@@ -44,10 +44,9 @@ INSTALLED_APPS = [
     "django.contrib.sites",
     "rest_framework",
     "corsheaders",
-    "djmoney",
-    "djmoney.contrib.exchange",
     "tinymce",
     "catalog",
+    "content",
     "customer",
     "mailing",
     "sales",
@@ -91,11 +90,10 @@ SITE_SCHEME = env("SITE_SCHEME", default="https")
 
 # Customer access lifetimes
 PURCHASES_PAGE_TTL = timedelta(hours=24)  # Customer.access_token
-DOWNLOAD_TTL = timedelta(hours=24)  # Allocation.token
+DOWNLOAD_TTL = timedelta(hours=24)  # OrderItem.token
 
-# Checkout limits. Every unpaid order holds its units until it expires, so one request must not be
-# able to lock a whole product.
-MAX_ITEM_QUANTITY = 30
+# Checkout limit. Nothing is reserved (ADR-0001), but every checkout costs a Plisio invoice, so a
+# single request must not be able to ask for the whole catalogue.
 MAX_ORDER_ITEMS = 25
 
 # Look up the MX record of the e-mail domain at checkout. Fails open on any DNS trouble, see
@@ -171,11 +169,6 @@ AUTH_PASSWORD_VALIDATORS = [
     },
 ]
 
-# Custom serializers
-SERIALIZATION_MODULES = {
-    "json": "djmoney.serializers",
-}
-
 # Internationalization
 USE_I18N = True
 LANGUAGE_CODE = "en"
@@ -197,11 +190,12 @@ TIME_ZONE = "UTC"
 STATIC_URL = "static/"
 STATIC_ROOT = BASE_DIR / "static"
 
-# Currency settings
-CURRENCIES = ("USD", "RUB")
-BASE_CURRENCY = "USD"
-EXCHANGE_BACKEND = "djmoney.contrib.exchange.backends.OpenExchangeRatesBackend"
-OPEN_EXCHANGE_RATES_APP_ID = env("OPENEXCHANGERATES_APP_ID")
+# Uploaded product files and images. The root is `products/` because that is the path the compose
+# volume is mounted on; `upload_to` adds `files/` or `images/` under it. nginx serves MEDIA_URL
+# from the same volume - the product file itself is never reached that way, it is streamed by
+# DownloadFileView behind a token.
+MEDIA_URL = "/media/"
+MEDIA_ROOT = BASE_DIR / "products"
 
 # Plisio token
 PLISIO_SECRET_KEY = env("PLISIO_SECRET_KEY")

@@ -1,53 +1,8 @@
-from django.conf import settings
-from django.contrib import admin, messages
-from django.db.models import QuerySet
-from django.db.transaction import atomic
+from django.contrib import admin
 from django.urls import reverse
 from django.utils.html import format_html
-from django.utils.module_loading import import_string
-from djmoney.contrib.exchange.models import ExchangeBackend, Rate
 
-from sales.models import Allocation, Order, OrderItem, PaymentCallbackLog, Transaction
-
-# Disable django-money's Rate admin model
-admin.site.unregister(Rate)
-
-
-# Setup custom Rate admin model
-@admin.register(Rate)
-class CustomRateAdmin(admin.ModelAdmin):
-    list_display = ("currency", "value", "last_update", "backend")
-    search_fields = ("currency",)
-    ordering = ("currency", "backend__last_update")
-    actions = ["update_exchange_rates"]
-
-    @admin.display(description="Last update")
-    def last_update(self, instance: Rate):
-        return instance.backend.last_update
-
-    @admin.action(description="Update exchange rates")
-    @atomic
-    def update_exchange_rates(self, request, queryset: QuerySet[Rate]):
-        currencies = queryset.values_list("currency", flat=True)
-
-        backend = import_string(settings.EXCHANGE_BACKEND)()
-        backend_model, _ = ExchangeBackend.objects.update_or_create(
-            name=backend.name,
-            defaults={"base_currency": settings.BASE_CURRENCY},
-        )
-
-        params = backend.get_params()
-        params.update(base_currency=settings.BASE_CURRENCY, symbols=",".join(currencies))
-        rates = backend.get_rates(**params)
-
-        try:
-            queryset.delete()
-            Rate.objects.bulk_create(
-                [Rate(currency=currency, value=value, backend=backend_model) for currency, value in rates.items()],
-            )
-            self.message_user(request, "Exchange rates updates successfully", messages.SUCCESS)
-        except Exception as e:
-            self.message_user(request, f"Error while updating exchange rates: {e}", messages.ERROR)
+from sales.models import Order, OrderItem, PaymentCallbackLog, Transaction
 
 
 class ReadOnlyAdmin(admin.ModelAdmin):
@@ -65,17 +20,33 @@ class ReadOnlyAdmin(admin.ModelAdmin):
         return False
 
 
-class DeliveredColumnMixin:
-    """How much of an item has actually been handed over - shown both inline and standalone."""
+class DownloadColumnsMixin:
+    """The state of a line's download link - shown both inline and standalone."""
 
-    @admin.display(description="Delivered")
-    def delivered(self, obj: OrderItem):
-        return f"{obj.allocations.filter(state=Allocation.State.DELIVERED).count()} / {obj.quantity}"
+    @admin.display(boolean=True, description="Link live")
+    def is_downloadable(self, obj: OrderItem):
+        return obj.is_token_valid()
+
+    @admin.display(description="Download link")
+    def download_link(self, obj: OrderItem):
+        """
+        The customer's own link, relative.
+
+        Relative rather than absolute so it needs no request: the previous version stashed one on
+        the ModelAdmin, which is a single instance shared by every thread of the process. The admin
+        is served from the same origin as the API, so the href resolves either way, and following
+        it does not move `download_count` - see DownloadFileView.
+        """
+
+        if obj.token is None:
+            return "-"
+
+        return format_html("<a href='{url}'>{text}</a>", url=reverse("download-file", args=[obj.token]), text=obj.token)
 
 
-class OrderItemInline(DeliveredColumnMixin, admin.TabularInline):
+class OrderItemInline(DownloadColumnsMixin, admin.TabularInline):
     model = OrderItem
-    fields = ["product", "product_name", "quantity", "unit_price", "unit_price_usd", "delivered"]
+    fields = ["product", "product_name", "unit_price", "is_downloadable", "download_count", "download_link"]
     readonly_fields = fields
     extra = 0
     show_change_link = True
@@ -88,7 +59,7 @@ class TransactionInline(admin.TabularInline):
     """An order can have several invoices - a currency switch mints a new one (ADR-0003)."""
 
     model = Transaction
-    fields = ["txn_id", "status", "amount", "currency", "source_price", "commission", "created_at"]
+    fields = ["txn_id", "status", "amount", "currency", "source_amount", "commission", "created_at"]
     readonly_fields = fields
     extra = 0
     show_change_link = True
@@ -114,61 +85,28 @@ class OrderAdmin(ReadOnlyAdmin):
 
 
 @admin.register(OrderItem)
-class OrderItemAdmin(DeliveredColumnMixin, ReadOnlyAdmin):
-    list_display = ("order", "product_name", "quantity", "delivered", "order_status")
-    list_filter = ("order__status", "product__country")
-    search_fields = ("order__customer__email", "product_name")
-    list_select_related = ("order", "product")
-    # The USD snapshot is only interesting next to the order total, so it stays on the Order page
-    # (OrderItemInline) and is left out here.
-    fields = ("order", "product", "product_name", "unit_price", "quantity")
-    readonly_fields = fields
-
-    @admin.display(description="Order status")
-    def order_status(self, obj: OrderItem):
-        return obj.order.get_status_display()
-
-
-@admin.register(Allocation)
-class AllocationAdmin(ReadOnlyAdmin):
-    list_display = ("id", "order_item", "stock_item", "state", "is_downloadable", "download_count", "download_link")
-    list_filter = ("state", "reserved_at", "order_item__order__status")
-    search_fields = ("order_item__order__customer__email", "order_item__product_name", "token")
-    list_select_related = ("order_item", "order_item__order", "order_item__order__customer", "stock_item")
-    readonly_fields = (
-        "order_item",
-        "stock_item",
-        "state",
-        "reserved_at",
-        "delivered_at",
-        "released_at",
+class OrderItemAdmin(DownloadColumnsMixin, ReadOnlyAdmin):
+    list_display = ("order", "product_name", "unit_price", "is_downloadable", "download_count", "order_status")
+    list_filter = ("order__status", "product__country", "product__document_type")
+    search_fields = ("order__customer__email", "product_name", "token")
+    list_select_related = ("order", "order__customer", "product")
+    fields = (
+        "order",
+        "product",
+        "product_name",
+        "unit_price",
         "token_expires_at",
         "download_link",
         "download_count",
         "first_downloaded_at",
         "last_downloaded_at",
     )
+    readonly_fields = fields
     exclude = ("token",)
 
-    @admin.display(boolean=True, description="Downloadable")
-    def is_downloadable(self, obj: Allocation):
-        return obj.is_token_valid()
-
-    @admin.display(description="Download link")
-    def download_link(self, obj: Allocation):
-        """
-        The customer's own link, relative.
-
-        Relative rather than absolute so it needs no request: the previous version stashed one on
-        the ModelAdmin, which is a single instance shared by every thread of the process. The admin
-        is served from the same origin as the API, so the href resolves either way, and following
-        it does not move `download_count` - see DownloadFileView.
-        """
-
-        if obj.token is None:
-            return "-"
-
-        return format_html("<a href='{url}'>{text}</a>", url=reverse("download-file", args=[obj.token]), text=obj.token)
+    @admin.display(description="Order status")
+    def order_status(self, obj: OrderItem):
+        return obj.order.get_status_display()
 
 
 @admin.register(Transaction)
@@ -181,7 +119,8 @@ class TransactionAdmin(ReadOnlyAdmin):
         "currency",
         "pending_amount",
         "tx_urls",
-        "source_price",
+        "source_amount",
+        "source_currency",
         "source_rate",
         "commission",
         "confirmations",

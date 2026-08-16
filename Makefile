@@ -225,14 +225,6 @@ superuser: ## Создать суперпользователя
 
 # --- Доменные команды -------------------------------------------------------
 
-.PHONY: update-rates
-update-rates: ## Обновить курсы валют (djmoney)
-	$(MANAGE) update_rates
-
-.PHONY: expire
-expire: ## Снять резерв с просроченных заказов
-	$(MANAGE) expire_transactions
-
 .PHONY: broadcast
 broadcast: ## Разослать письма из очереди (QUEUED); флаги: c="--id N --dry-run --test"
 	$(MANAGE) broadcast $(c)

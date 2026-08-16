@@ -1,146 +1,293 @@
+from io import BytesIO
 from typing import TYPE_CHECKING
 
-from django.apps import apps
+from django.core.files.base import ContentFile
 from django.db import models
-from django.db.models import Count, Exists, IntegerField, OuterRef, Subquery
-from django.db.models.functions import Coalesce
-from django.utils import timezone
+from django.db.models import Count, Q
+from django.db.models.signals import post_delete
+from django.dispatch import receiver
 from django.utils.translation import gettext_lazy as _
-from djmoney.models.fields import MoneyField
+
+from catalog.validators import validate_not_reserved
 
 if TYPE_CHECKING:
-    from sales.models import Allocation
+    from sales.models import OrderItem
 
 
-class Country(models.Model):
+class SeoFieldsMixin(models.Model):
     """
-    Group of products, usually a country (the code drives the flag icon).
+    Meta tags a page can override.
+
+    Left empty they are built from the name, so the owner only fills them in where the generated
+    text is not good enough - see `storefront` for the fallbacks.
+    """
+
+    meta_title = models.CharField(max_length=255, blank=True, default="")
+    meta_description = models.CharField(max_length=500, blank=True, default="")
+    seo_text = models.TextField(blank=True, default="")
+
+    class Meta:
+        abstract = True
+
+
+class CountryQuerySet(models.QuerySet):
+    def with_product_counts(self) -> "CountryQuerySet":
+        """Annotate `products_count` - active products only, which is what the sidebar shows."""
+
+        return self.annotate(products_count=Count("products", filter=Q(products__is_active=True)))
+
+    def non_empty(self) -> "CountryQuerySet":
+        return self.with_product_counts().filter(products_count__gt=0)
+
+
+class Country(SeoFieldsMixin):
+    """
+    Country of the document. Drives the sidebar, the flag on a card and one level of the URL.
 
     :param name: Country name (translated).
-    :param code: Country code, "-" when the group is not a country.
+    :param slug: Latin slug used in the URL, e.g. "germany".
+    :param code: ISO 3166-1 alpha-2 code, used for the flag.
+    :param is_popular: Shown in the "popular" block of the sidebar - set by hand, not computed.
+    :param position: Manual ordering; ties fall back to the name.
     """
 
     name = models.CharField(max_length=255)
-    code = models.CharField(max_length=31, null=True, default=None)
+    slug = models.SlugField(max_length=255, unique=True, validators=[validate_not_reserved])
+    code = models.CharField(max_length=2, blank=True, default="")
+
+    is_popular = models.BooleanField(default=False)
+    position = models.PositiveSmallIntegerField(default=0)
+
+    objects = CountryQuerySet.as_manager()
 
     if TYPE_CHECKING:
         products: "ProductQuerySet"
 
-    @property
-    def flag(self) -> str:
-        return self.code2flag(self.code) if self.code != "-" else "-"
-
     class Meta:
         verbose_name = _("Country")
         verbose_name_plural = _("Countries")
-        ordering = ["name"]
+        ordering = ["position", "name"]
 
     def __str__(self):
-        return f"{self.flag} - {self.name}"
+        return f"{self.flag} {self.name}".strip()
+
+    @property
+    def flag(self) -> str:
+        return self.code2flag(self.code)
 
     @staticmethod
     def code2flag(code: str | None) -> str:
-        """Return emoji flag from country code (e.g. 'al' -> '🇦🇱')."""
+        """Emoji flag from an ISO code ('de' -> '🇩🇪'). Empty code gives an empty string."""
+
         return "".join(chr(0x1F1E6 + (ord(c.upper()) - ord("A"))) for c in code) if code else ""
 
 
-class StockItemQuerySet(models.QuerySet):
-    def available(self):
-        """Units nobody holds: no allocation at all, or every allocation is RELEASED (see ADR-0002)."""
-
-        # Imported lazily - sales points at catalog by FK, a module-level import would close the loop.
-        allocation = apps.get_model("sales", "Allocation")
-        held = allocation.objects.filter(stock_item=OuterRef("pk")).exclude(state=allocation.State.RELEASED)
-        return self.filter(~Exists(held))
+class DocumentTypeQuerySet(models.QuerySet):
+    def with_product_counts(self) -> "DocumentTypeQuerySet":
+        return self.annotate(products_count=Count("products", filter=Q(products__is_active=True)))
 
 
-class ProductQuerySet(models.QuerySet):
-    def with_available(self):
-        """Annotate `available` - how many units of the product nobody holds."""
-
-        free = (
-            StockItem.objects.available()
-            .filter(product=OuterRef("pk"))
-            .order_by()
-            .values("product")
-            .annotate(count=Count("pk"))
-            .values("count")
-        )
-        return self.annotate(available=Coalesce(Subquery(free, output_field=IntegerField()), 0))
-
-
-class Product(models.Model):
+class DocumentType(SeoFieldsMixin):
     """
-    Sellable position of the catalog: a name, a price and a pile of interchangeable units.
+    Kind of document: utility bill, bank statement, tax. A badge on the card and a filter.
 
-    :param name: Product name (translated).
-    :param price: Price of one unit.
-    :param country: Group this product belongs to.
+    A model rather than choices: the owner adds a kind without a migration, and the slug is part
+    of the URL.
+
+    :param name: Type name (translated).
+    :param slug: Latin slug used in the URL, e.g. "utility-bill".
+    :param position: Manual ordering; ties fall back to the name.
     """
 
     name = models.CharField(max_length=255)
-    price = MoneyField(max_digits=10, decimal_places=2, default_currency="USD")
+    slug = models.SlugField(max_length=255, unique=True, validators=[validate_not_reserved])
+    position = models.PositiveSmallIntegerField(default=0)
 
-    country = models.ForeignKey(Country, related_name="products", on_delete=models.CASCADE)
-
-    objects = ProductQuerySet.as_manager()
+    objects = DocumentTypeQuerySet.as_manager()
 
     if TYPE_CHECKING:
-        stock_items: StockItemQuerySet
+        products: "ProductQuerySet"
 
     class Meta:
-        verbose_name = _("Product")
-        verbose_name_plural = _("Products")
-        ordering = ["name"]
+        verbose_name = _("Document type")
+        verbose_name_plural = _("Document types")
+        ordering = ["position", "name"]
 
     def __str__(self):
         return self.name
 
-    def available_count(self) -> int:
-        """Stock left. Prefer `Product.objects.with_available()` for lists - this is one query per product."""
-        return self.stock_items.available().count()
+
+class ProductQuerySet(models.QuerySet):
+    def active(self) -> "ProductQuerySet":
+        return self.filter(is_active=True)
+
+    def for_listing(self) -> "ProductQuerySet":
+        """Everything a card needs, without a query per row."""
+
+        return self.select_related("country", "document_type").prefetch_related("images")
 
 
-class StockItem(models.Model):
+class Product(models.Model):
     """
-    One unit of a product: one file that can be sold exactly once.
+    One template on sale: a file plus everything the storefront shows about it.
 
-    Has no status of its own - who holds it (if anybody) is a question about Allocation, see ADR-0001.
+    Sold any number of times, so it carries no stock (ADR-0001). It cannot be deleted once bought -
+    `OrderItem.product` is PROTECT, and taking it off the shelf is `is_active=False`.
 
-    :param file: Path to the file being sold.
-    :param product: Product that gives the unit its name and price.
-    :param created_at: When the unit was added to stock.
+    :param name: Product name (translated).
+    :param slug: Latin part of the URL; the id in front of it keeps the address unique.
+    :param description: Product description (translated).
+    :param country: Country of the document.
+    :param document_type: Kind of document.
+    :param year: Year printed on the document, if any.
+    :param price: Price in USD.
+    :param file: The file the customer downloads after paying.
+    :param is_active: Whether the product is on the storefront.
     """
 
-    file = models.FileField(upload_to="products/", unique=True)
+    name = models.CharField(max_length=255)
+    slug = models.SlugField(max_length=255)
+    description = models.TextField(blank=True, default="")
 
-    product = models.ForeignKey(Product, related_name="stock_items", on_delete=models.SET_NULL, null=True)
+    country = models.ForeignKey(Country, related_name="products", on_delete=models.PROTECT)
+    document_type = models.ForeignKey(DocumentType, related_name="products", on_delete=models.PROTECT)
+    year = models.PositiveSmallIntegerField(null=True, blank=True)
 
-    # Units that predate the field carry the deploy date: it is not when they arrived, but every
-    # row having a date keeps the age figures from needing a second, "unknown" bucket.
-    created_at = models.DateTimeField(default=timezone.now, editable=False)
+    price = models.DecimalField(max_digits=10, decimal_places=2)
+    file = models.FileField(upload_to="files/")
 
-    objects = StockItemQuerySet.as_manager()
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    meta_title = models.CharField(max_length=255, blank=True, default="")
+    meta_description = models.CharField(max_length=500, blank=True, default="")
+
+    objects = ProductQuerySet.as_manager()
 
     if TYPE_CHECKING:
-        allocations: models.QuerySet["Allocation"]
+        images: models.QuerySet["ProductImage"]
+        order_items: models.QuerySet["OrderItem"]
 
     class Meta:
-        verbose_name = _("Stock item")
-        verbose_name_plural = _("Stock items")
-        ordering = ["product", "file"]
+        verbose_name = _("Product")
+        verbose_name_plural = _("Products")
+        ordering = ["-year", "name"]
+        indexes = [
+            models.Index(fields=["is_active", "country", "document_type"]),
+            models.Index(fields=["year"]),
+        ]
 
     def __str__(self):
-        return f"{self.product.name if self.product else 'NULL'} - {self.file.name}"
+        return self.name
 
-    def is_available(self) -> bool:
-        """
-        Same rule as `StockItemQuerySet.available()`, for a single row.
+    @property
+    def url_slug(self) -> str:
+        """The last URL segment: the id makes it unique, the slug makes it readable."""
 
-        Held means held by anybody: a RESERVED unit of an unpaid order is just as unavailable as a
-        DELIVERED one. Only RELEASED allocations leave the unit free. One query per call - use the
-        queryset for lists.
-        """
+        return f"{self.pk}-{self.slug}" if self.slug else str(self.pk)
 
-        allocation = apps.get_model("sales", "Allocation")
-        return not self.allocations.exclude(state=allocation.State.RELEASED).exists()
+    @property
+    def preview(self) -> "ProductImage | None":
+        """First image by position - the one the card shows. Uses the prefetch when there is one."""
+
+        images = self.images.all()
+        return images[0] if images else None
+
+
+# Longest side of each generated variant, in pixels.
+IMAGE_VARIANTS = {"card": 500, "page": 1200}
+# Both are written for every variant: webp for browsers that take it, jpeg as the fallback.
+IMAGE_FIELDS = ("card", "card_webp", "page", "page_webp")
+
+
+class ProductImage(models.Model):
+    """
+    One preview image of a product, plus the variants the storefront actually serves.
+
+    The owner uploads a single file of any size; the resized jpeg/webp pairs are generated here,
+    so a 5 MB scan never reaches a phone.
+
+    :param product: Product this image belongs to.
+    :param image: The uploaded original.
+    :param position: Order in the gallery; the first one is the card preview.
+    """
+
+    product = models.ForeignKey(Product, related_name="images", on_delete=models.CASCADE)
+    image = models.ImageField(upload_to="images/")
+
+    card = models.ImageField(upload_to="images/", editable=False, blank=True)
+    card_webp = models.ImageField(upload_to="images/", editable=False, blank=True)
+    page = models.ImageField(upload_to="images/", editable=False, blank=True)
+    page_webp = models.ImageField(upload_to="images/", editable=False, blank=True)
+
+    position = models.PositiveSmallIntegerField(default=0)
+
+    class Meta:
+        verbose_name = _("Product image")
+        verbose_name_plural = _("Product images")
+        ordering = ["position", "pk"]
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # Remembered so save() can tell a replaced upload from an untouched one.
+        self._source_name = self.image.name if self.image else ""
+
+    def __str__(self):
+        return f"{self.product_id} - {self.image.name}"
+
+    def save(self, *args, **kwargs):
+        super().save(*args, **kwargs)
+
+        if self.image and (self.image.name != self._source_name or not self.card):
+            self.build_variants()
+            self._source_name = self.image.name
+
+    def build_variants(self):
+        """(Re)generate every variant from the original. Old files are dropped first."""
+
+        # Imported here so the module keeps importing on a machine without Pillow's binaries.
+        from PIL import Image
+
+        for field in IMAGE_FIELDS:
+            stored = getattr(self, field)
+            if stored:
+                stored.delete(save=False)
+
+        stem = self.image.name.rsplit("/", 1)[-1].rsplit(".", 1)[0]
+
+        with Image.open(self.image) as source:
+            source.load()
+            # Flattened onto white: the fallback is jpeg, which has no alpha channel to keep.
+            if source.mode in ("RGBA", "LA", "P"):
+                flat = Image.new("RGB", source.size, (255, 255, 255))
+                flat.paste(source.convert("RGBA"), mask=source.convert("RGBA").split()[-1])
+                source = flat
+            else:
+                source = source.convert("RGB")
+
+            for variant, size in IMAGE_VARIANTS.items():
+                frame = source.copy()
+                frame.thumbnail((size, size * 4))
+
+                for suffix, fmt, options in (("", "JPEG", {"quality": 85}), ("_webp", "WEBP", {"quality": 82})):
+                    buffer = BytesIO()
+                    frame.save(buffer, format=fmt, **options)
+                    extension = "webp" if suffix else "jpg"
+                    getattr(self, f"{variant}{suffix}").save(
+                        f"{stem}_{variant}.{extension}",
+                        ContentFile(buffer.getvalue()),
+                        save=False,
+                    )
+
+        super().save(update_fields=list(IMAGE_FIELDS))
+
+
+@receiver(post_delete, sender=ProductImage)
+def drop_image_files(sender, instance: ProductImage, **kwargs):
+    """A deleted row must not leave five files behind - including when a queryset deletes it."""
+
+    for field in ("image", *IMAGE_FIELDS):
+        stored = getattr(instance, field)
+        if stored:
+            stored.delete(save=False)

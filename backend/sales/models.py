@@ -5,36 +5,18 @@ from typing import TYPE_CHECKING
 
 from django.conf import settings
 from django.db import models
-from django.db.models import Count, F, ProtectedError, Q, UniqueConstraint, Value
+from django.db.models import F, UniqueConstraint, Value
 from django.db.models.functions import Coalesce
 from django.db.transaction import atomic
 from django.http import HttpRequest
 from django.urls import reverse
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
-from djmoney.models.fields import MoneyField
 
 from backend.sites import absolute_url
-from catalog.models import Product, StockItem
+from catalog.models import Product
 
 logger = logging.getLogger(__name__)
-
-
-def protect_held_units(collector, field, sub_objs, using):
-    """
-    on_delete for Allocation.stock_item: a unit somebody holds cannot be deleted.
-
-    A DELIVERED unit is the file a paying customer downloads, so dropping it would leave the sale
-    without anything to hand over; a RESERVED one belongs to a live order. Both are refused.
-    RELEASED allocations are history and let the file go, keeping the record with a NULL unit.
-    """
-
-    held = [allocation for allocation in sub_objs if allocation.state != Allocation.State.RELEASED]
-    if held:
-        logger.warning(f"Refused to delete stock items held by allocations {[a.pk for a in held]}")
-        raise ProtectedError("Cannot delete a unit that an order holds", held)
-
-    models.SET_NULL(collector, field, sub_objs, using)
 
 
 class OrderQuerySet(models.QuerySet):
@@ -50,36 +32,34 @@ class OrderQuerySet(models.QuerySet):
 
         return self.filter(paid_at__isnull=False)
 
-    def reusable(self, email: str, items: list[dict]) -> "Order | None":
+    def reusable(self, email: str, products: list[Product]) -> "Order | None":
         """
         A live invoice of this customer for exactly this cart, or None.
 
         Handing it back instead of minting a second order is what keeps a double click - or someone
-        probing the checkout with the same cart - from reserving another copy of the same units.
+        probing the checkout with the same cart - from filling Plisio with dead invoices.
         """
 
-        wanted = sorted((item["product"].pk, item["quantity"]) for item in items)
-        wanted_units = sum(quantity for _, quantity in wanted)
+        wanted = sorted(product.pk for product in products)
 
         candidates = (
             self.filter(customer__email=email, status=Order.OrderStatus.PENDING)
             .exclude(invoice_url="")
-            .annotate(reserved=Count("items__allocations", filter=Q(items__allocations__state="RESERVED")))
             .prefetch_related("items__product")
             .order_by("-created_at")
         )
 
         for order in candidates:
-            if order.is_expired() or order.reserved != wanted_units:
+            if order.is_expired():
                 continue
 
             items_of = list(order.items.all())
-            if sorted((item.product_id, item.quantity) for item in items_of) != wanted:
+            if sorted(item.product_id for item in items_of) != wanted:
                 continue
 
             # The catalog price must not have moved since, otherwise the old invoice would sell at
             # the old price. Both sides come from the same column, so this compares exactly.
-            if all(item.product and item.unit_price == item.product.price for item in items_of):
+            if all(item.unit_price == item.product.price for item in items_of):
                 return order
 
         return None
@@ -91,7 +71,7 @@ class Order(models.Model):
 
     :param customer: Who bought.
     :param status: Order status (PENDING, PAID, OVERPAID, EXPIRED, ERROR, CANCELLED).
-    :param total_price: Total price of the order, in USD as sent to Plisio.
+    :param total_price: Total price of the order in USD, as sent to Plisio.
     :param invoice_url: Plisio invoice this order was sent to, empty until the invoice is minted.
     :param created_at: When the order was created.
     :param updated_at: When the order was last touched.
@@ -106,15 +86,16 @@ class Order(models.Model):
         ERROR = "ERROR", "Error"
         CANCELLED = "CANCELLED", "Cancelled"
 
-    # How long a reservation lives. The invoice Plisio mints expires in 60 minutes, so an order
-    # gets that from its last move plus ten minutes of grace from creation. Read these instead of
-    # writing the number again - `statistics.time_to_pay` counts late payments against them.
-    RESERVATION_FROM_CREATED = timedelta(hours=1, minutes=10)
-    RESERVATION_FROM_UPDATED = timedelta(hours=1)
+    # How long an unpaid order can still be sent back to its own invoice. The invoice Plisio mints
+    # expires in 60 minutes, so an order gets that from its last move plus ten minutes of grace
+    # from creation. Read these instead of writing the number again - `statistics.time_to_pay`
+    # counts late payments against them.
+    INVOICE_FROM_CREATED = timedelta(hours=1, minutes=10)
+    INVOICE_FROM_UPDATED = timedelta(hours=1)
 
     customer = models.ForeignKey("customer.Customer", related_name="orders", on_delete=models.PROTECT)
     status = models.CharField(max_length=15, choices=OrderStatus.choices, default=OrderStatus.PENDING)
-    total_price = MoneyField(max_digits=10, decimal_places=2, default_currency="USD")
+    total_price = models.DecimalField(max_digits=10, decimal_places=2)
     invoice_url = models.URLField(max_length=500, blank=True, default="")
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -122,9 +103,8 @@ class Order(models.Model):
 
     objects = OrderQuerySet.as_manager()
 
-    # Annotated with the queryset, see catalog.models.
     if TYPE_CHECKING:
-        items: models.QuerySet["OrderItem"]
+        items: "OrderItemQuerySet"
         transactions: models.QuerySet["Transaction"]
         callback_logs: models.QuerySet["PaymentCallbackLog"]
 
@@ -139,10 +119,7 @@ class Order(models.Model):
     def is_expired(self):
         now = timezone.now()
 
-        return (
-            now > self.created_at + self.RESERVATION_FROM_CREATED
-            or now > self.updated_at + self.RESERVATION_FROM_UPDATED
-        )
+        return now > self.created_at + self.INVOICE_FROM_CREATED or now > self.updated_at + self.INVOICE_FROM_UPDATED
 
     def mark_paid(self) -> bool:
         """
@@ -163,205 +140,73 @@ class Order(models.Model):
         return bool(stamped)
 
     @atomic
-    def deliver(self) -> list["Allocation"]:
-        """Hand over every item. Safe to repeat and tops up what the reservation lost."""
+    def deliver(self) -> list["OrderItem"]:
+        """
+        Hand the files over: every line gets a download token.
 
-        allocations = []
-        for order_item in self.items.all():
-            allocations.extend(order_item.deliver())
+        A template never runs out (ADR-0001), so this cannot fail on stock, and repeating it is
+        harmless - a line that already holds a live token keeps it, so a second callback does not
+        invalidate the link the customer is already using.
+        """
 
-        return allocations
+        items = list(self.items.select_for_update())
+        fresh = [item for item in items if not item.is_token_valid()]
+
+        for item in fresh:
+            item.issue_token(commit=False)
+
+        if fresh:
+            OrderItem.objects.bulk_update(fresh, ["token", "token_expires_at"])
+            logger.info(f"Order {self.pk} delivered lines {[item.pk for item in fresh]}")
+
+        return items
+
+
+class OrderItemQuerySet(models.QuerySet):
+    def downloadable(self) -> "OrderItemQuerySet":
+        """Lines of paid orders - the only ones the purchases page lists and serves."""
+
+        return self.filter(order__paid_at__isnull=False)
+
+    def of_customer(self, customer) -> "OrderItemQuerySet":
+        return self.filter(order__customer=customer)
 
     @atomic
-    def release(self) -> list["Allocation"]:
-        """Give the reserved units back. Idempotent."""
+    def reissue_tokens(self) -> list["OrderItem"]:
+        """Give every selected line a fresh token, resetting DOWNLOAD_TTL. Idempotent by nature."""
 
-        allocations = []
-        for order_item in self.items.all():
-            allocations.extend(order_item.release())
+        items = list(self.select_for_update())
+        for item in items:
+            item.issue_token(commit=False)
 
-        return allocations
+        OrderItem.objects.bulk_update(items, ["token", "token_expires_at"])
+        return items
 
 
 class OrderItem(models.Model):
     """
-    A wanted quantity of one product, with the price frozen at checkout.
+    One product in an order, priced as of checkout, and the link it is downloaded from.
 
     The snapshot fields answer "what did this cost back then" - the catalog is free to change
-    afterwards, and the product may even be deleted.
+    afterwards. There is no quantity: buying the same template twice makes no sense, so a product
+    appears in an order at most once (ADR-0001).
 
-    :param order: Order this item belongs to.
-    :param product: Product bought, NULL once it leaves the catalog.
+    :param order: Order this line belongs to.
+    :param product: Product bought; PROTECT, because the file has to outlive the sale.
     :param product_name: Product name as of checkout.
-    :param unit_price: Price of one unit as of checkout, in the product's own currency.
-    :param unit_price_usd: The same price converted to USD at the exchange rate of that day. Not
-        derivable from `unit_price` afterwards - a RUB-priced product converts differently every
-        day, and this is the number `Order.total_price` was built from and Plisio was billed for.
-    :param quantity: How many units.
-    """
-
-    order = models.ForeignKey(Order, related_name="items", on_delete=models.CASCADE)
-    product = models.ForeignKey(Product, related_name="order_items", on_delete=models.SET_NULL, null=True)
-
-    product_name = models.CharField(max_length=255)
-    unit_price = MoneyField(max_digits=10, decimal_places=2, default_currency="USD")
-    unit_price_usd = models.DecimalField(max_digits=10, decimal_places=2)
-
-    quantity = models.PositiveIntegerField()
-
-    if TYPE_CHECKING:
-        allocations: models.QuerySet["Allocation"]
-
-    class Meta:
-        verbose_name = _("Order item")
-        verbose_name_plural = _("Order items")
-
-    def __str__(self):
-        return f"{self.quantity} x {self.product_name} - {self.order}"
-
-    @atomic
-    def _allocate(self, count: int) -> list["Allocation"]:
-        """Take `count` free units of the product and reserve them for this item."""
-
-        if count <= 0:
-            return []
-
-        if self.product_id is None:
-            logger.error(f"Order item {self.pk} has no product to allocate from")
-            raise ValueError(f"Order item {self.pk} has no product to allocate from")
-
-        # Lock the product row so concurrent checkouts of the same product queue up here instead of
-        # picking the same units. The partial unique index on Allocation is the hard backstop.
-        Product.objects.select_for_update().filter(pk=self.product_id).exists()
-
-        units = list(StockItem.objects.available().filter(product_id=self.product_id)[:count])
-        if len(units) != count:
-            logger.error(
-                f"Order item {self.pk} (order {self.order_id}) is out of stock for product "
-                f"{self.product_id}: need {count}, have {len(units)}"
-            )
-            raise ValueError(f"Not enough stock for product {self.product_id}: need {count}, have {len(units)}")
-
-        logger.info(f"Order item {self.pk} reserved units {[unit.pk for unit in units]}")
-        now = timezone.now()
-        return Allocation.objects.bulk_create(
-            [
-                Allocation(order_item=self, stock_item=unit, state=Allocation.State.RESERVED, reserved_at=now)
-                for unit in units
-            ]
-        )
-
-    @atomic
-    def reserve(self) -> list["Allocation"]:
-        """Reserve the whole quantity at checkout."""
-
-        if self.allocations.exclude(state=Allocation.State.RELEASED).exists():
-            logger.error(f"Order item {self.pk} (order {self.order_id}) already holds units, refusing to reserve again")
-            raise ValueError(f"Order item {self.pk} cannot be reserved twice")
-
-        return self._allocate(self.quantity)
-
-    @atomic
-    def deliver(self) -> list["Allocation"]:
-        """
-        Turn the reservation into a delivery: RESERVED -> DELIVERED with a fresh token.
-
-        Repeating this is a no-op, and a late payment is no longer a special case: if the reservation
-        was already released, the missing units are allocated again from current stock. Running out-of-stock
-        raises, and the caller rolls the callback back so Plisio can retry.
-        """
-
-        delivered = list(self.allocations.filter(state=Allocation.State.DELIVERED))
-        reserved = list(self.allocations.select_for_update().filter(state=Allocation.State.RESERVED))
-
-        missing = self.quantity - len(delivered) - len(reserved)
-        if missing > 0:
-            # Late payment: the reservation had already expired, so we buy the units back now.
-            logger.warning(f"Order item {self.pk} lost {missing} unit(s) before payment, re-allocating from stock")
-            reserved.extend(self._allocate(missing))
-
-        now = timezone.now()
-        for allocation in reserved:
-            allocation.state = Allocation.State.DELIVERED
-            allocation.delivered_at = now
-            allocation.issue_token(commit=False)
-
-        Allocation.objects.bulk_update(reserved, ["state", "delivered_at", "token", "token_expires_at"])
-        return delivered + reserved
-
-    @atomic
-    def release(self) -> list["Allocation"]:
-        """Return reserved units to stock. Delivered ones are never touched."""
-
-        reserved = list(self.allocations.select_for_update().filter(state=Allocation.State.RESERVED))
-
-        now = timezone.now()
-        for allocation in reserved:
-            allocation.state = Allocation.State.RELEASED
-            allocation.released_at = now
-
-        Allocation.objects.bulk_update(reserved, ["state", "released_at"])
-        if reserved:
-            logger.info(f"Order item {self.pk} released units {[a.stock_item_id for a in reserved]}")
-
-        return reserved
-
-
-class AllocationQuerySet(models.QuerySet):
-    def downloadable(self) -> "AllocationQuerySet":
-        """Units already handed over - the only ones the purchases page lists."""
-
-        return self.filter(state=Allocation.State.DELIVERED)
-
-    def of_customer(self, customer) -> "AllocationQuerySet":
-        return self.filter(order_item__order__customer=customer)
-
-    @atomic
-    def reissue_tokens(self) -> list["Allocation"]:
-        """Give every selected unit a fresh token, resetting DOWNLOAD_TTL. Idempotent by nature."""
-
-        allocations = list(self.select_for_update())
-        for allocation in allocations:
-            allocation.issue_token(commit=False)
-
-        Allocation.objects.bulk_update(allocations, ["token", "token_expires_at"])
-        return allocations
-
-
-class Allocation(models.Model):
-    """
-    The link between one stock unit and one order item - the single source of truth about who
-    holds a unit and whether it was handed over (ADR-0001).
-
-    Its existence in a non-RELEASED state is what makes a unit unavailable, so "reserved by
-    nobody" cannot happen and neither can "sold without a download link".
-
-    :param order_item: Item this unit was allocated to.
-    :param stock_item: The unit; only ever NULL for a RELEASED allocation, see `protect_held_units`.
-    :param state: RESERVED (held), DELIVERED (handed over), RELEASED (given back).
-    :param reserved_at: When the unit was taken.
-    :param delivered_at: When the unit was handed over.
-    :param released_at: When the unit was given back.
-    :param token: Opens this single file; rotated on request, see DOWNLOAD_TTL.
+    :param unit_price: Price as of checkout, in USD.
+    :param token: Opens this one file; rotated on request, see DOWNLOAD_TTL.
     :param token_expires_at: When the token stops working.
-    :param download_count: How many times the file behind this allocation was served.
+    :param download_count: How many times the file was served to the customer.
     :param first_downloaded_at: When the customer first took the file.
     :param last_downloaded_at: When the customer last took the file.
     """
 
-    class State(models.TextChoices):
-        RESERVED = "RESERVED", _("Reserved")
-        DELIVERED = "DELIVERED", _("Delivered")
-        RELEASED = "RELEASED", _("Released")
+    order = models.ForeignKey(Order, related_name="items", on_delete=models.CASCADE)
+    product = models.ForeignKey(Product, related_name="order_items", on_delete=models.PROTECT)
 
-    order_item = models.ForeignKey(OrderItem, related_name="allocations", on_delete=models.CASCADE)
-    stock_item = models.ForeignKey(StockItem, related_name="allocations", on_delete=protect_held_units, null=True)
-
-    state = models.CharField(max_length=15, choices=State.choices, default=State.RESERVED)
-
-    reserved_at = models.DateTimeField(default=timezone.now)
-    delivered_at = models.DateTimeField(null=True, blank=True)
-    released_at = models.DateTimeField(null=True, blank=True)
+    product_name = models.CharField(max_length=255)
+    unit_price = models.DecimalField(max_digits=10, decimal_places=2)
 
     token = models.UUIDField(null=True, blank=True, unique=True)
     token_expires_at = models.DateTimeField(null=True, blank=True)
@@ -371,23 +216,18 @@ class Allocation(models.Model):
     first_downloaded_at = models.DateTimeField(null=True, blank=True)
     last_downloaded_at = models.DateTimeField(null=True, blank=True)
 
-    objects = AllocationQuerySet.as_manager()
+    objects = OrderItemQuerySet.as_manager()
 
     class Meta:
-        verbose_name = _("Allocation")
-        verbose_name_plural = _("Allocations")
-        ordering = ["-reserved_at"]
+        verbose_name = _("Order item")
+        verbose_name_plural = _("Order items")
+        ordering = ["pk"]
         constraints = [
-            # One file - one buyer. Released units are free again, so they stay out of the index.
-            UniqueConstraint(
-                fields=["stock_item"],
-                condition=~Q(state="RELEASED"),
-                name="one_active_allocation_per_stock_item",
-            ),
+            UniqueConstraint(fields=["order", "product"], name="one_line_per_product_in_order"),
         ]
 
     def __str__(self):
-        return f"{self.state} {self.stock_item_id} for {self.order_item_id}"
+        return f"{self.product_name} - {self.order}"
 
     def is_token_valid(self) -> bool:
         return self.token is not None and self.token_expires_at is not None and timezone.now() <= self.token_expires_at
@@ -409,7 +249,7 @@ class Allocation(models.Model):
         """
 
         now = timezone.now()
-        Allocation.objects.filter(pk=self.pk).update(
+        OrderItem.objects.filter(pk=self.pk).update(
             download_count=F("download_count") + 1,
             first_downloaded_at=Coalesce("first_downloaded_at", Value(now)),
             last_downloaded_at=now,
@@ -440,7 +280,8 @@ class Transaction(models.Model):
     :param currency: Cryptocurrency of the invoice.
     :param pending_amount: What is still missing when the customer underpaid.
     :param tx_urls: Blockchain transactions of this invoice, as sent by Plisio.
-    :param source_price: Source amount and currency (if provided) - the fiat side of the invoice.
+    :param source_amount: The fiat side of the invoice, as Plisio reports it.
+    :param source_currency: Currency of `source_amount`; ours is always USD (ADR-0006).
     :param source_rate: How much of `currency` one unit of `source_currency` buys, so that
         `amount / source_rate` is the fiat value. It divides, it never multiplies - Plisio's own
         example has 0.0104 ETH at a rate of 0.00052 for $20.
@@ -475,13 +316,8 @@ class Transaction(models.Model):
     pending_amount = models.DecimalField(max_digits=20, decimal_places=10, null=True, blank=True)
     tx_urls = models.JSONField(null=True, blank=True)
 
-    source_price = MoneyField(
-        max_digits=10,
-        decimal_places=2,
-        default_currency="USD",
-        null=True,
-        blank=True,
-    )  # source_amount and source_currency
+    source_amount = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    source_currency = models.CharField(max_length=10, blank=True, default="")
     source_rate = models.DecimalField(max_digits=20, decimal_places=10, null=True, blank=True)
     commission = models.DecimalField(max_digits=20, decimal_places=10, null=True, blank=True)
 
