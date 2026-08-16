@@ -1,0 +1,103 @@
+<script setup>
+import logo_icon from '@/assets/logo_icon.png';
+</script>
+
+<template>
+  <router-link :to="{name: 'main'}" class="logo-link">
+    <div class="logo-icon">
+      <img :src="logo_icon" alt="logo">
+      <div class="circle"></div>
+    </div>
+    <div class="site-info">
+      <span class="name"><span style="color: #3ab02a">Verif</span>-docs</span>
+      <br>
+      <span class="description">{{ $t('site_info.logo_description') }}</span>
+    </div>
+  </router-link>
+</template>
+
+<style lang="scss" scoped>
+.logo-wrapper {
+  display: flex;
+  align-items: center;
+}
+
+.logo-link {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
+  width: fit-content;
+  text-decoration: none;
+
+  &:active, &:visited {
+    color: initial;
+  }
+
+  &:hover {
+    opacity: .85;
+  }
+}
+
+.logo-icon {
+  --size: 48px;
+
+  position: relative;
+  height: var(--size);
+  width: var(--size);
+
+  > img {
+    width: 100%;
+    height: 100%;
+    object-fit: fill;
+  }
+
+  > .circle {
+    position: absolute;
+    bottom: 0;
+    z-index: -1;
+    //background-color: var(--accent-color);
+
+    width: var(--size);
+    height: var(--size);
+    border-radius: 100%;
+  }
+}
+
+.site-info {
+  text-wrap: nowrap;
+  color: #000000;
+
+  > .name {
+    font-size: 20px;
+    font-weight: 600;
+    float: left;
+    text-transform: uppercase;
+  }
+
+  > .description {
+    font-size: 12px;
+    float: left;
+  }
+}
+
+@media only screen and (max-width: 350px) {
+  .logo-link {
+    gap: 15px;
+
+    .logo-icon {
+      --size: 35px;
+    }
+  }
+
+  .site-info {
+    > .description {
+      font-size: 10px;
+    }
+
+    > .name {
+      font-size: 16px;
+    }
+  }
+}
+</style>

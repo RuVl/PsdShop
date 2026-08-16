@@ -1,0 +1,95 @@
+volumes:
+  postgres_volume: # Volume for database
+    name: psdshop_postgres
+  products_volume: # Volume for product files
+    name: psdshop_products
+  static_volume: # Volume with django static for serving by nginx
+    name: psdshop_static
+
+networks:
+  psdshop:
+    driver: bridge
+    name: psdshop
+
+services:
+  frontend-nginx:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    volumes:
+      - static_volume:/app/static
+    env_file: frontend/.env
+    ports:
+      - "80:80"
+      - "443:443"
+    networks:
+      - psdshop
+    depends_on:
+      - backend
+
+  postgres:
+    build:
+      context: ./postgres
+      dockerfile: Dockerfile
+    container_name: psdshop_postgres
+    restart: unless-stopped
+    init: true
+    stop_grace_period: 60s
+    volumes:
+      - postgres_volume:/var/lib/postgresql/data
+      - ./postgres/backups:/var/backups/postgres
+    env_file: postgres/.env
+    expose:
+      - 5432
+    networks:
+      - psdshop
+    healthcheck:
+      test: pg_isready -U $$POSTGRES_USER
+      start_period: 10s
+      start_interval: 10s
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    volumes:
+      - products_volume:/app/products
+      - static_volume:/app/static
+      - ./backend/logs:/app/logs
+    env_file:
+      - backend/.env
+      - postgres/.env
+    expose:
+      - 8000
+    networks:
+      - psdshop
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  # Reserve SMTP-relay with DKIM (postfix + opendkim)
+  # How to run: docker compose --profile mail up -d mail
+  # and in backend/.env: EMAIL_URL=smtp://mail:587
+  # Replace example.com with the real sending domain here and in the key path below, and publish
+  # the matching mail._domainkey TXT record. Never set DKIM_AUTOGENERATE - it rotates the key.
+  mail:
+    image: boky/postfix:v5.1.0-alpine
+    restart: unless-stopped
+    hostname: mail.example.com
+    profiles:
+      - mail
+    environment:
+      ALLOWED_SENDER_DOMAINS: example.com
+      DKIM_SELECTOR: mail
+      POSTFIX_myhostname: mail.example.com
+      POSTFIX_smtp_tls_security_level: may
+    volumes:
+      # Opendkim private key (/etc/opendkim/keys/<domain>.private)
+      - ./secrets/opendkim/example.com.private:/etc/opendkim/keys/example.com.private:ro
+    networks:
+      - psdshop

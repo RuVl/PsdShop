@@ -1,0 +1,33 @@
+# Redirect http -> https (and www -> site)
+server {
+  listen                  80;
+  listen                  [::]:80;
+  server_name             www.${DOMAIN} ${DOMAIN};
+
+  return                  301 https://${DOMAIN}$request_uri;
+}
+
+# Redirect www -> site (https)
+server {
+  listen                  443 ssl;
+  listen                  [::]:443 ssl;
+  server_name             www.${DOMAIN};
+
+  # SSL sertificates
+  ssl_certificate         /etc/ssl/${DOMAIN}.crt;
+  ssl_certificate_key     /etc/ssl/${DOMAIN}.key;
+
+  return                  301 https://${DOMAIN}$request_uri;
+}
+
+server {
+  listen                  443 ssl default_server;
+  listen                  [::]:443;
+  server_name             ${DOMAIN};
+
+  # SSL sertificates
+  ssl_certificate         /etc/ssl/${DOMAIN}.crt;
+  ssl_certificate_key     /etc/ssl/${DOMAIN}.key;
+
+  include                 /etc/nginx/site-body.conf;
+}

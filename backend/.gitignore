@@ -1,0 +1,12 @@
+# Enviroment
+.env
+dev.env
+
+# virtual enviroment
+.venv/
+
+# Compiled files
+**/*.mo
+
+# Cache
+**/__pycache__/
