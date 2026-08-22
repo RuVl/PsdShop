@@ -8,8 +8,9 @@ from django.core.files.base import ContentFile
 from django.db.models import ProtectedError
 from django.test import TestCase, override_settings
 
+from backend.urlspace import reserved_slugs
 from catalog.models import IMAGE_FIELDS, IMAGE_VARIANTS, Country, DocumentType, Product, ProductImage
-from catalog.validators import RESERVED_SLUGS
+from content.models import Page
 from customer.models import Customer
 from sales.models import Order, OrderItem
 
@@ -43,7 +44,7 @@ class CatalogFactoryMixin:
 
 
 class SlugTests(CatalogFactoryMixin, TestCase):
-    """A country slug sits in the same URL position as a service path (/cart, /info)."""
+    """A country slug sits in the same URL position as a service path (/cart) and as a page."""
 
     def test_a_reserved_slug_is_refused(self):
         country = Country(name="Cart", slug="cart", code="xx")
@@ -52,7 +53,7 @@ class SlugTests(CatalogFactoryMixin, TestCase):
             country.full_clean()
 
     def test_the_wildcard_segment_is_reserved(self):
-        self.assertIn("all", RESERVED_SLUGS)
+        self.assertIn("all", reserved_slugs())
 
         with self.assertRaises(ValidationError):
             DocumentType(name="Everything", slug="all").full_clean()
@@ -60,6 +61,29 @@ class SlugTests(CatalogFactoryMixin, TestCase):
     def test_a_document_type_cannot_shadow_a_service_path(self):
         with self.assertRaises(ValidationError):
             DocumentType(name="Purchases", slug="purchases").full_clean()
+
+    def test_a_language_prefix_is_reserved(self):
+        """The codes come from settings.LANGUAGES, not from a second list to keep in step."""
+
+        with self.assertRaises(ValidationError):
+            Country(name="English", slug="en", code="gb").full_clean()
+
+    def test_the_media_root_is_reserved(self):
+        """Derived from MEDIA_URL - nginx answers there, so a country cannot."""
+
+        with self.assertRaises(ValidationError):
+            Country(name="Media", slug="media", code="xx").full_clean()
+
+    def test_a_country_cannot_shadow_a_page(self):
+        Page.objects.create(slug="contacts", title="Contacts")
+
+        with self.assertRaises(ValidationError):
+            Country(name="Contacts", slug="contacts", code="xx").full_clean()
+
+    def test_a_document_type_may_repeat_a_country_slug(self):
+        """A type is addressed under a country, so the two never share a position."""
+
+        DocumentType(name="Germany", slug=self.country.slug).full_clean()
 
     def test_an_ordinary_slug_passes(self):
         Country(name="Poland", slug="poland", code="pl").full_clean()

@@ -9,7 +9,7 @@ from django.dispatch import receiver
 from django.utils.translation import gettext_lazy as _
 
 from backend.seo import MetaTagsMixin
-from catalog.validators import validate_not_reserved
+from backend.urlspace import validate_not_reserved, validate_slug_is_free
 
 if TYPE_CHECKING:
     from sales.models import OrderItem
@@ -58,6 +58,11 @@ class Country(MetaTagsMixin):
 
     def __str__(self):
         return f"{self.flag} {self.name}".strip()
+
+    def clean(self):
+        super().clean()
+        # A country and a text page answer on the same URL segment - see backend/urlspace.py.
+        validate_slug_is_free(self)
 
     @property
     def flag(self) -> str:

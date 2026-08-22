@@ -3,7 +3,7 @@
 import django.db.models.deletion
 from django.db import migrations, models
 
-import catalog.validators
+import backend.urlspace
 
 
 class Migration(migrations.Migration):
@@ -30,9 +30,7 @@ class Migration(migrations.Migration):
                 ("name_ru", models.CharField(max_length=255, null=True)),
                 (
                     "slug",
-                    models.SlugField(
-                        max_length=255, unique=True, validators=[catalog.validators.validate_not_reserved]
-                    ),
+                    models.SlugField(max_length=255, unique=True, validators=[backend.urlspace.validate_not_reserved]),
                 ),
                 ("code", models.CharField(blank=True, default="", max_length=2)),
                 ("is_popular", models.BooleanField(default=False)),
@@ -62,9 +60,7 @@ class Migration(migrations.Migration):
                 ("name_ru", models.CharField(max_length=255, null=True)),
                 (
                     "slug",
-                    models.SlugField(
-                        max_length=255, unique=True, validators=[catalog.validators.validate_not_reserved]
-                    ),
+                    models.SlugField(max_length=255, unique=True, validators=[backend.urlspace.validate_not_reserved]),
                 ),
                 ("position", models.PositiveSmallIntegerField(default=0)),
             ],

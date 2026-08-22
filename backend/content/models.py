@@ -5,6 +5,7 @@ from django.db import models
 from django.utils.translation import gettext_lazy as _
 
 from backend.seo import MetaTagsMixin
+from backend.urlspace import validate_not_reserved, validate_slug_is_free
 
 
 class Page(MetaTagsMixin):
@@ -22,7 +23,7 @@ class Page(MetaTagsMixin):
 
     HOME = "home"
 
-    slug = models.SlugField(max_length=255, unique=True)
+    slug = models.SlugField(max_length=255, unique=True, validators=[validate_not_reserved])
     title = models.CharField(max_length=255)
     body = models.TextField(blank=True, default="")
 
@@ -36,6 +37,11 @@ class Page(MetaTagsMixin):
 
     def __str__(self):
         return self.title or self.slug
+
+    def clean(self):
+        super().clean()
+        # A page and a country answer on the same URL segment - see backend/urlspace.py.
+        validate_slug_is_free(self)
 
 
 class SlideQuerySet(models.QuerySet):

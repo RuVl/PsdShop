@@ -2,6 +2,8 @@
 
 from django.db import migrations, models
 
+import backend.urlspace
+
 
 class Migration(migrations.Migration):
     initial = True
@@ -13,7 +15,10 @@ class Migration(migrations.Migration):
             name="Page",
             fields=[
                 ("id", models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name="ID")),
-                ("slug", models.SlugField(max_length=255, unique=True)),
+                (
+                    "slug",
+                    models.SlugField(max_length=255, unique=True, validators=[backend.urlspace.validate_not_reserved]),
+                ),
                 ("title", models.CharField(max_length=255)),
                 ("title_en", models.CharField(max_length=255, null=True)),
                 ("title_ru", models.CharField(max_length=255, null=True)),
