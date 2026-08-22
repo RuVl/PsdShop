@@ -869,6 +869,22 @@ class CartItemsTests(SalesFactoryMixin, TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data, [])
 
+    def test_the_name_follows_the_language_the_page_asks_for(self):
+        """The API is outside the language prefix, so the cart says which language it draws in."""
+
+        self.product.name_ru = "Счёт за коммуналку"
+        self.product.save(update_fields=["name_ru"])
+
+        response = self.client.get(reverse("cart-items"), {"ids": str(self.product.pk), "lang": "ru"})
+
+        self.assertEqual(response.data[0]["name"], "Счёт за коммуналку")
+
+    def test_an_unknown_language_falls_back_instead_of_failing(self):
+        response = self.client.get(reverse("cart-items"), {"ids": str(self.product.pk), "lang": "xx"})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data[0]["name"], self.product.name)
+
 
 class MailOutageTests(SalesFactoryMixin, TestCase):
     """A dead SMTP must not cost the customer their order or their link."""

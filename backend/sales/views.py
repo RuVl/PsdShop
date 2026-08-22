@@ -9,6 +9,7 @@ from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.http import FileResponse, HttpResponseNotFound
+from django.utils import translation
 from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -331,6 +332,15 @@ class RefreshAllOrderItemsView(APIView):
         return Response(serializer.data)
 
 
+def _requested_language(request) -> str:
+    """`?lang=` when it names a language we have, otherwise whatever LocaleMiddleware settled on."""
+
+    requested = request.query_params.get("lang", "")
+    known = {code for code, _name in settings.LANGUAGES}
+
+    return requested if requested in known else translation.get_language()
+
+
 class CartItemsView(APIView):
     """
     Products by id, for the cart that lives in the browser.
@@ -346,4 +356,9 @@ class CartItemsView(APIView):
 
         products = Product.objects.active().filter(pk__in=ids).prefetch_related("images")
         serializer = CartItemSerializer(products, many=True, context={"request": request})
-        return Response(serializer.data)
+
+        # The API sits outside the language prefix, so the page says which language it is in.
+        # Without this the names resolve to MODELTRANSLATION_DEFAULT_LANGUAGE and a Russian
+        # storefront would draw an English cart.
+        with translation.override(_requested_language(request)):
+            return Response(serializer.data)
