@@ -161,6 +161,14 @@ dev-reset: ## Пересоздать контейнер dev-postgres (сохра
 	$(COMPOSE_DEV) up -d --build --wait
 	@echo "OK: dev-postgres пересоздан."
 
+.PHONY: dev-nuke
+dev-nuke: ## УДАЛИТЬ dev-БД вместе с volume psdshop_postgres и поднять пустую
+	@echo "ВНИМАНИЕ: volume psdshop_postgres будет удалён вместе со всеми данными."
+	@echo "Нужно после перегенерации миграций: старая БД помнит удалённые файлы миграций."
+	$(COMPOSE_DEV) down -v
+	$(COMPOSE_DEV) up -d --build --wait
+	@echo "OK: пустая dev-БД поднята. Дальше: make dev-migrate"
+
 .PHONY: dev-manage
 dev-manage: dev-infra ## Произвольная manage.py команда локально (dev-БД): make dev-manage c="seed_testdata --flush"
 	$(MANAGE_DEV) $(c)

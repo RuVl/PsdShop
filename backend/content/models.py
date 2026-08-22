@@ -1,6 +1,5 @@
 """Everything on the storefront the owner writes: pages, the welcome slider and site-wide texts."""
 
-from django.core.exceptions import ValidationError
 from django.db import models
 from django.utils.translation import gettext_lazy as _
 
@@ -88,7 +87,10 @@ class SiteSettings(models.Model):
     The one row of site-wide settings, edited in the admin.
 
     A singleton: `load()` is the only way anything reads it, and saving always writes row 1, so a
-    second row cannot appear and quietly win.
+    second row cannot appear and quietly win. Deletion is closed off in the admin
+    (`has_delete_permission`) rather than on the model - a `delete()` override reads as a promise
+    it cannot keep, because a queryset delete never calls it. Losing the row costs nothing anyway:
+    `load()` writes an empty one back.
 
     :param support_url: Where "write to support" goes (a Telegram link, usually).
     :param contact_email: Address shown on the contacts page.
@@ -109,9 +111,6 @@ class SiteSettings(models.Model):
     def save(self, *args, **kwargs):
         self.pk = 1
         super().save(*args, **kwargs)
-
-    def delete(self, *args, **kwargs):
-        raise ValidationError(_("The site settings row cannot be deleted."))
 
     @classmethod
     def load(cls) -> "SiteSettings":

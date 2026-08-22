@@ -76,18 +76,20 @@ class ProductAdmin(SeoFieldsetMixin, TranslationAdmin):
         """
         A bought product cannot be deleted - its file is what the customer downloads (ADR-0001).
 
-        `OrderItem.product` is PROTECT, so the database refuses it anyway; this turns the resulting
-        500 into a message that says what to do instead.
+        Both delete flows already stop before this: the confirmation page collects the related
+        rows, finds the PROTECTed `OrderItem`s and refuses to offer the button. This is the net
+        under the race where the first order for a product lands between the two requests, and it
+        turns the resulting 500 into a message that says what to do instead.
+
+        `delete_queryset` is deliberately not overridden: walking the queryset object by object
+        would swallow one error per sold product while `delete_selected` still reported every
+        selected row as deleted.
         """
 
         try:
             super().delete_model(request, obj)
         except ProtectedError:
             self.message_user(request, self.SOLD_PRODUCT_MESSAGE % obj, messages.ERROR)
-
-    def delete_queryset(self, request, queryset):
-        for product in queryset:
-            self.delete_model(request, product)
 
     SOLD_PRODUCT_MESSAGE = (
         '"%s" has been bought at least once and cannot be deleted - its file has to stay '
