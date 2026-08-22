@@ -15,6 +15,8 @@ Including another URLconf
     2. Add a URL to urlpatterns:  path('blog/', include('blog.urls'))
 """
 
+from django.conf import settings
+from django.conf.urls.static import static
 from django.contrib import admin
 from django.urls import include, path
 
@@ -23,3 +25,9 @@ urlpatterns = [
     path("api/", include("mailing.urls")),
     path("api/", include("sales.urls")),
 ]
+
+# Product previews, development only - in production nginx serves them. Deliberately narrowed to
+# `images/`: MEDIA_ROOT also holds the paid product files, and those must only ever be reached
+# through DownloadFileView, behind a token.
+if settings.DEBUG:
+    urlpatterns += static(f"{settings.MEDIA_URL}images/", document_root=settings.MEDIA_ROOT / "images")

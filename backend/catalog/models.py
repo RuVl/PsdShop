@@ -8,26 +8,11 @@ from django.db.models.signals import post_delete
 from django.dispatch import receiver
 from django.utils.translation import gettext_lazy as _
 
+from backend.seo import MetaTagsMixin
 from catalog.validators import validate_not_reserved
 
 if TYPE_CHECKING:
     from sales.models import OrderItem
-
-
-class SeoFieldsMixin(models.Model):
-    """
-    Meta tags a page can override.
-
-    Left empty they are built from the name, so the owner only fills them in where the generated
-    text is not good enough - see `storefront` for the fallbacks.
-    """
-
-    meta_title = models.CharField(max_length=255, blank=True, default="")
-    meta_description = models.CharField(max_length=500, blank=True, default="")
-    seo_text = models.TextField(blank=True, default="")
-
-    class Meta:
-        abstract = True
 
 
 class CountryQuerySet(models.QuerySet):
@@ -40,7 +25,7 @@ class CountryQuerySet(models.QuerySet):
         return self.with_product_counts().filter(products_count__gt=0)
 
 
-class Country(SeoFieldsMixin):
+class Country(MetaTagsMixin):
     """
     Country of the document. Drives the sidebar, the flag on a card and one level of the URL.
 
@@ -49,6 +34,7 @@ class Country(SeoFieldsMixin):
     :param code: ISO 3166-1 alpha-2 code, used for the flag.
     :param is_popular: Shown in the "popular" block of the sidebar - set by hand, not computed.
     :param position: Manual ordering; ties fall back to the name.
+    :param seo_text: Text block under the listing (translated).
     """
 
     name = models.CharField(max_length=255)
@@ -57,6 +43,8 @@ class Country(SeoFieldsMixin):
 
     is_popular = models.BooleanField(default=False)
     position = models.PositiveSmallIntegerField(default=0)
+
+    seo_text = models.TextField(blank=True, default="")
 
     objects = CountryQuerySet.as_manager()
 
@@ -87,7 +75,7 @@ class DocumentTypeQuerySet(models.QuerySet):
         return self.annotate(products_count=Count("products", filter=Q(products__is_active=True)))
 
 
-class DocumentType(SeoFieldsMixin):
+class DocumentType(MetaTagsMixin):
     """
     Kind of document: utility bill, bank statement, tax. A badge on the card and a filter.
 
@@ -97,11 +85,14 @@ class DocumentType(SeoFieldsMixin):
     :param name: Type name (translated).
     :param slug: Latin slug used in the URL, e.g. "utility-bill".
     :param position: Manual ordering; ties fall back to the name.
+    :param seo_text: Text block under the listing (translated).
     """
 
     name = models.CharField(max_length=255)
     slug = models.SlugField(max_length=255, unique=True, validators=[validate_not_reserved])
     position = models.PositiveSmallIntegerField(default=0)
+
+    seo_text = models.TextField(blank=True, default="")
 
     objects = DocumentTypeQuerySet.as_manager()
 
@@ -127,7 +118,7 @@ class ProductQuerySet(models.QuerySet):
         return self.select_related("country", "document_type").prefetch_related("images")
 
 
-class Product(models.Model):
+class Product(MetaTagsMixin):
     """
     One template on sale: a file plus everything the storefront shows about it.
 
@@ -159,9 +150,6 @@ class Product(models.Model):
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
-
-    meta_title = models.CharField(max_length=255, blank=True, default="")
-    meta_description = models.CharField(max_length=500, blank=True, default="")
 
     objects = ProductQuerySet.as_manager()
 

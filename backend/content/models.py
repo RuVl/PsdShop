@@ -4,8 +4,10 @@ from django.core.exceptions import ValidationError
 from django.db import models
 from django.utils.translation import gettext_lazy as _
 
+from backend.seo import MetaTagsMixin
 
-class Page(models.Model):
+
+class Page(MetaTagsMixin):
     """
     A text page written in the admin: the rules, the contacts, the SEO block of the home page.
 
@@ -23,9 +25,6 @@ class Page(models.Model):
     slug = models.SlugField(max_length=255, unique=True)
     title = models.CharField(max_length=255)
     body = models.TextField(blank=True, default="")
-
-    meta_title = models.CharField(max_length=255, blank=True, default="")
-    meta_description = models.CharField(max_length=500, blank=True, default="")
 
     is_published = models.BooleanField(default=True)
     updated_at = models.DateTimeField(auto_now=True)

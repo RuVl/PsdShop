@@ -404,5 +404,5 @@ postgres in docker:
   Conventional-Commit message:** `type(scope): что сделал` in Russian, past tense. Types: `feat`,
   `fix`, `refactor`, `style`, `docs`, `ci`, `test`, `chore`. Scopes: `catalog`, `customer`, `sales`,
   `backend`, `frontend`, `mail`, `Makefile`, `deps`, etc. Example:
-  `ci(Makefile): добавил dev-цели для локального запуска`. This is a recap of the work performed -
+  `ci(Makefile): added dev targets for local runs`. This is a recap of the work performed -
   **not** an instruction to create a git commit.

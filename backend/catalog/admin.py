@@ -3,6 +3,7 @@ from django.db.models import ProtectedError
 from django.utils.html import format_html
 from modeltranslation.admin import TranslationAdmin
 
+from backend.seo import SeoFieldsetMixin
 from catalog.models import Country, DocumentType, Product, ProductImage
 
 
@@ -22,7 +23,7 @@ class ProductImageInline(admin.TabularInline):
 
 
 @admin.register(Country)
-class CountryAdmin(TranslationAdmin):
+class CountryAdmin(SeoFieldsetMixin, TranslationAdmin):
     list_display = ["flag", "name", "slug", "code", "products_count", "is_popular", "position"]
     list_editable = ["is_popular", "position"]
     list_filter = ["is_popular"]
@@ -38,7 +39,7 @@ class CountryAdmin(TranslationAdmin):
 
 
 @admin.register(DocumentType)
-class DocumentTypeAdmin(TranslationAdmin):
+class DocumentTypeAdmin(SeoFieldsetMixin, TranslationAdmin):
     list_display = ["name", "slug", "products_count", "position"]
     list_editable = ["position"]
     search_fields = ["name_en", "name_ru", "slug"]
@@ -53,7 +54,7 @@ class DocumentTypeAdmin(TranslationAdmin):
 
 
 @admin.register(Product)
-class ProductAdmin(TranslationAdmin):
+class ProductAdmin(SeoFieldsetMixin, TranslationAdmin):
     list_display = ["name", "country", "document_type", "year", "price", "images_count", "is_active"]
     list_editable = ["price", "is_active"]
     list_filter = ["is_active", "country", "document_type", "year"]

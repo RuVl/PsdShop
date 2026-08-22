@@ -5,6 +5,7 @@ from django.urls import reverse
 from modeltranslation.admin import TranslationAdmin
 from tinymce.widgets import TinyMCE
 
+from backend.seo import SeoFieldsetMixin
 from content.models import Page, SiteSettings, Slide
 
 
@@ -18,7 +19,7 @@ class PageAdminForm(forms.ModelForm):
 
 
 @admin.register(Page)
-class PageAdmin(TranslationAdmin):
+class PageAdmin(SeoFieldsetMixin, TranslationAdmin):
     form = PageAdminForm
     list_display = ["slug", "title", "is_published", "updated_at"]
     list_filter = ["is_published"]
