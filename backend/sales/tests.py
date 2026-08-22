@@ -1,12 +1,10 @@
 import hashlib
 import hmac
 import json
-import tempfile
 import uuid
 from datetime import timedelta
 from decimal import Decimal
 from io import StringIO
-from pathlib import Path
 from unittest.mock import patch
 
 import dns.resolver
@@ -18,18 +16,19 @@ from django.core import mail
 from django.core.files.base import ContentFile
 from django.core.management import call_command
 from django.db import IntegrityError, transaction
-from django.test import RequestFactory, TestCase, override_settings
+from django.test import RequestFactory, TestCase
 from django.urls import reverse
 from django.utils import timezone, translation
 from rest_framework.test import APIClient
 
+from backend.testing import TempUploadsMixin
 from catalog.models import Country, DocumentType, Product
 from customer.models import Customer
 from sales.models import Order, OrderItem, PaymentCallbackLog, Transaction
 from sales.utils import send_purchases_link
 
 
-class SalesFactoryMixin:
+class SalesFactoryMixin(TempUploadsMixin):
     """A catalogue small enough to reason about, and orders built the way the checkout builds them."""
 
     def make_product(self, name: str = "Germany utility bill 2022", price: str = "10.00", **overrides) -> Product:
@@ -63,6 +62,7 @@ class SalesFactoryMixin:
         return order.deliver()
 
     def setUp(self):
+        super().setUp()
         self.country = Country.objects.create(name="Germany", slug="germany", code="de")
         self.document_type = DocumentType.objects.create(name="Utility bill", slug="utility-bill")
         self.customer = Customer.objects.create(email="buyer@example.com")
@@ -285,11 +285,9 @@ class ServedFilesMixin(SalesFactoryMixin):
 
     def setUp(self):
         super().setUp()
-        media = self.enterContext(tempfile.TemporaryDirectory())
-        self.enterContext(override_settings(MEDIA_ROOT=media))
 
         product = self.make_product()
-        path = Path(media) / product.file.name
+        path = self.private / product.file.name
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(b"%PDF-1.4 test")
 

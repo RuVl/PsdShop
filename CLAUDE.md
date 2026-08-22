@@ -54,6 +54,7 @@ make dev-backend   # runserver 0.0.0.0:8000 on the host
 make dev-frontend  # vite dev server on 0.0.0.0:5173 (host); make dev-frontend-build for prod build
 make dev-superuser / make dev-infra-down
 make dev-reset     # recreate the dev-postgres container (keeps the psdshop_postgres volume/data)
+make dev-nuke      # DROP the volume and bring an empty db up - needed after migrations are regenerated
 
 # Any manage.py command - generic escape hatch (custom or built-in). Pass the args via c=.
 make manage c="showmigrations"            # inside the backend container
@@ -256,6 +257,21 @@ Everything in USD, days are **UTC** days (`TIME_ZONE = "UTC"`), and the page say
   draw no point, and a 7-day trailing average (`statistics.moving_average`) rides alongside.
 - **The CSV is not what the page shows.** A screen is cut to the top ten; the export carries every
   product sold in the period. It starts with a BOM or Excel mangles non-ASCII product names.
+
+### Uploads: two roots, one volume
+
+`MEDIA_ROOT` is `backend/products/media/` - product previews and slide images, public. nginx serves
+them from `location /media/` off the `products` volume (mounted read-only there), and under `DEBUG`
+Django serves the same tree itself.
+
+The paid files live in `PRODUCT_FILES_ROOT` (`backend/products/private/`), **outside MEDIA_ROOT**,
+on `catalog/storages.py: ProductFilesStorage`. It has no `base_url`, so `product.file.url` raises
+instead of handing out a path, and no nginx location maps onto that directory: the only way to a
+product file is `DownloadFileView`, behind a token. Both roots are read from settings on access, so
+`TempUploadsMixin` (`backend/testing.py`) can redirect them - a test never writes into the tree.
+
+Replacing an upload deletes the file it replaced (`Product.save`, `ProductImage.save`), and deleting
+a row deletes its files (`post_delete`), including on a queryset delete.
 
 ### nginx
 

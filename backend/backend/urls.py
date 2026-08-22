@@ -26,8 +26,8 @@ urlpatterns = [
     path("api/", include("sales.urls")),
 ]
 
-# Product previews, development only - in production nginx serves them. Deliberately narrowed to
-# `images/`: MEDIA_ROOT also holds the paid product files, and those must only ever be reached
-# through DownloadFileView, behind a token.
+# Product previews and slide images, development only - in production nginx serves them off the
+# volume. MEDIA_ROOT holds nothing else: the paid files sit in PRODUCT_FILES_ROOT, outside it, and
+# are only ever reached through DownloadFileView, behind a token.
 if settings.DEBUG:
-    urlpatterns += static(f"{settings.MEDIA_URL}images/", document_root=settings.MEDIA_ROOT / "images")
+    urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)

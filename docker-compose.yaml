@@ -19,6 +19,8 @@ services:
     restart: unless-stopped
     volumes:
       - static_volume:/app/static
+      # Read-only: nginx serves products/media/ and must never be able to write there.
+      - products_volume:/app/products:ro
     env_file: frontend/.env
     ports:
       - "80:80"

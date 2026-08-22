@@ -21,8 +21,8 @@ secrets/
 # Logging files
 *.log
 
-# Uploaded product files. MEDIA_ROOT is unset, so FileField(upload_to="products/")
-# lands next to manage.py - in the container that is /app, locally it is backend/.
+# Uploads: products/media/ is what nginx serves, products/private/ holds the paid files.
+# The directory is the compose volume mount point, so locally it lands under backend/.
 backend/products/
 
 # Collected static files (collectstatic)

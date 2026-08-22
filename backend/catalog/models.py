@@ -10,6 +10,7 @@ from django.utils.translation import gettext_lazy as _
 
 from backend.seo import MetaTagsMixin
 from backend.urlspace import validate_not_reserved, validate_slug_is_free
+from catalog.storages import ProductFilesStorage
 
 if TYPE_CHECKING:
     from sales.models import OrderItem
@@ -113,6 +114,17 @@ class DocumentType(MetaTagsMixin):
         return self.name
 
 
+def product_file_storage() -> ProductFilesStorage:
+    """
+    Where a paid file is written: `PRODUCT_FILES_ROOT`, outside MEDIA_ROOT and outside any URL.
+
+    A callable, so the migration records this name rather than a storage with a frozen path baked
+    into it.
+    """
+
+    return ProductFilesStorage()
+
+
 class ProductQuerySet(models.QuerySet):
     def active(self) -> "ProductQuerySet":
         return self.filter(is_active=True)
@@ -150,7 +162,7 @@ class Product(MetaTagsMixin):
     year = models.PositiveSmallIntegerField(null=True, blank=True)
 
     price = models.DecimalField(max_digits=10, decimal_places=2)
-    file = models.FileField(upload_to="files/")
+    file = models.FileField(upload_to="", storage=product_file_storage)
 
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -171,8 +183,30 @@ class Product(MetaTagsMixin):
             models.Index(fields=["year"]),
         ]
 
+    # What the row held when it was read. Empty on a new instance, so a first save never mistakes
+    # its own upload for a replacement - the name a colliding upload gets belongs to someone else.
+    _stored_file = ""
+
+    @classmethod
+    def from_db(cls, db, field_names, values):
+        instance = super().from_db(db, field_names, values)
+        instance._stored_file = instance.file.name
+        return instance
+
     def __str__(self):
         return self.name
+
+    def save(self, *args, **kwargs):
+        replaced = self._stored_file and self.file.name != self._stored_file
+
+        super().save(*args, **kwargs)
+
+        # A replaced file is unreachable the moment the row points elsewhere, and it is the one
+        # upload here that is measured in megabytes.
+        if replaced:
+            self.file.storage.delete(self._stored_file)
+
+        self._stored_file = self.file.name if self.file else ""
 
     @property
     def url_slug(self) -> str:
@@ -221,20 +255,31 @@ class ProductImage(models.Model):
         verbose_name_plural = _("Product images")
         ordering = ["position", "pk"]
 
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        # Remembered so save() can tell a replaced upload from an untouched one.
-        self._source_name = self.image.name if self.image else ""
+    # The original this row was read with; see the note on Product._stored_file.
+    _source_name = ""
+
+    @classmethod
+    def from_db(cls, db, field_names, values):
+        instance = super().from_db(db, field_names, values)
+        instance._source_name = instance.image.name
+        return instance
 
     def __str__(self):
         return f"{self.product_id} - {self.image.name}"
 
     def save(self, *args, **kwargs):
+        replaced = self._source_name and self.image.name != self._source_name
+
         super().save(*args, **kwargs)
 
-        if self.image and (self.image.name != self._source_name or not self.card):
+        if self.image and (replaced or not self.card):
+            # The previous original is nobody's now - the variants are rebuilt from the new one.
+            if replaced:
+                self.image.storage.delete(self._source_name)
+
             self.build_variants()
-            self._source_name = self.image.name
+
+        self._source_name = self.image.name if self.image else ""
 
     def build_variants(self):
         """(Re)generate every variant from the original. Old files are dropped first."""
@@ -274,6 +319,14 @@ class ProductImage(models.Model):
                     )
 
         super().save(update_fields=list(IMAGE_FIELDS))
+
+
+@receiver(post_delete, sender=Product)
+def drop_product_file(sender, instance: Product, **kwargs):
+    """A deleted product must not leave its file behind - a product is only ever deleted unsold."""
+
+    if instance.file:
+        instance.file.delete(save=False)
 
 
 @receiver(post_delete, sender=ProductImage)

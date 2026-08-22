@@ -1,13 +1,12 @@
-import tempfile
 from decimal import Decimal
 from io import BytesIO
-from pathlib import Path
 
 from django.core.exceptions import ValidationError
 from django.core.files.base import ContentFile
 from django.db.models import ProtectedError
-from django.test import TestCase, override_settings
+from django.test import TestCase
 
+from backend.testing import TempUploadsMixin
 from backend.urlspace import reserved_slugs
 from catalog.models import IMAGE_FIELDS, IMAGE_VARIANTS, Country, DocumentType, Product, ProductImage
 from content.models import Page
@@ -23,7 +22,7 @@ def png_bytes(width: int = 1600, height: int = 1200) -> bytes:
     return buffer.getvalue()
 
 
-class CatalogFactoryMixin:
+class CatalogFactoryMixin(TempUploadsMixin):
     def setUp(self):
         super().setUp()
         self.country = Country.objects.create(name="Germany", slug="germany", code="de")
@@ -120,15 +119,11 @@ class CountingTests(CatalogFactoryMixin, TestCase):
         self.assertEqual(Product.objects.active().count(), 1)
 
 
-@override_settings(MEDIA_ROOT=tempfile.mkdtemp())
 class ProductImageTests(CatalogFactoryMixin, TestCase):
     """The owner uploads one file; the storefront must never serve that original."""
 
     def setUp(self):
         super().setUp()
-        media = self.enterContext(tempfile.TemporaryDirectory())
-        self.enterContext(override_settings(MEDIA_ROOT=media))
-        self.media = Path(media)
         self.product = self.make_product()
 
     def add_image(self, **overrides) -> ProductImage:
@@ -162,6 +157,16 @@ class ProductImageTests(CatalogFactoryMixin, TestCase):
         self.assertNotEqual(image.card.name, first_card)
         self.assertFalse((self.media / first_card).exists(), "the previous variant was left on disk")
 
+    def test_replacing_the_upload_drops_the_previous_original(self):
+        image = ProductImage.objects.get(pk=self.add_image().pk)
+        first_original = image.image.name
+
+        image.image = ContentFile(png_bytes(800, 800), name="other.png")
+        image.save()
+
+        self.assertNotEqual(image.image.name, first_original)
+        self.assertFalse((self.media / first_original).exists(), "the previous original was left on disk")
+
     def test_deleting_the_row_takes_every_file_with_it(self):
         image = self.add_image()
         paths = [self.media / getattr(image, field).name for field in ("image", *IMAGE_FIELDS)]
@@ -190,6 +195,42 @@ class ProductImageTests(CatalogFactoryMixin, TestCase):
 
     def test_a_product_without_images_has_no_preview(self):
         self.assertIsNone(self.product.preview)
+
+
+class ProductFileTests(CatalogFactoryMixin, TestCase):
+    """The paid file is the product; it must be nowhere near what the site serves openly."""
+
+    def test_the_file_is_written_outside_media_root(self):
+        product = self.make_product()
+
+        self.assertTrue((self.private / product.file.name).exists())
+        self.assertEqual(list(self.media.iterdir()), [])
+
+    def test_the_file_has_no_url(self):
+        """`base_url` is unset on purpose - nothing may build a link to a paid file by accident."""
+
+        product = self.make_product()
+
+        with self.assertRaises(ValueError):
+            product.file.url  # noqa: B018
+
+    def test_deleting_the_product_takes_its_file(self):
+        product = self.make_product()
+        path = self.private / product.file.name
+
+        product.delete()
+
+        self.assertFalse(path.exists())
+
+    def test_replacing_the_file_drops_the_previous_one(self):
+        product = Product.objects.get(pk=self.make_product().pk)
+        first = self.private / product.file.name
+
+        product.file = ContentFile(b"newer", name="replacement.psd")
+        product.save()
+
+        self.assertFalse(first.exists())
+        self.assertTrue((self.private / product.file.name).exists())
 
 
 class ProductDeletionTests(CatalogFactoryMixin, TestCase):
