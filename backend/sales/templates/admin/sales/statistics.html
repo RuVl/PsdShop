@@ -89,55 +89,6 @@
 {% endif %}
 
 <div class="stats-grid">
-  <div class="stats-block wide">
-    <h2>Stock forecast</h2>
-    <p class="hint">Right now, at the sales rate of the last {{ sales_rate_days }} days - not the period above.</p>
-    <div class="scroll">
-      <table>
-        <thead><tr><th>Product</th><th>Country</th><th class="num">Available</th>
-          <th class="num">Sold/{{ sales_rate_days }}d</th><th class="num">Days left</th></tr></thead>
-        <tbody>
-        {# Sorted by urgency: sold out first, then closest to running out, then the never-selling tail. #}
-        {% for row in stock_page %}
-          <tr>
-            <td>{{ row.product }}</td>
-            <td>{{ row.country }}</td>
-            <td class="num {% if not row.available %}low{% endif %}">{{ row.available }}</td>
-            <td class="num">{{ row.sold }}</td>
-            {# `is not None` on purpose: zero days left is "sold out", not "never runs out". #}
-            <td class="num {% if row.days_left is not None and row.days_left < 14 %}low{% endif %}">
-              {% if row.days_left is not None %}{{ row.days_left|floatformat:0 }}{% else %}&mdash;{% endif %}
-            </td>
-          </tr>
-        {% empty %}
-          <tr><td colspan="5">The catalogue is empty.</td></tr>
-        {% endfor %}
-        </tbody>
-      </table>
-    </div>
-    {# Same shape as admin/pagination.html, so the admin's own .paginator styles apply as they are. #}
-    <p class="paginator">
-      {% if stock_page.paginator.num_pages > 1 %}
-        {% for item in stock_page_numbers %}
-          {% if item.number == stock_ellipsis %}
-            {{ stock_ellipsis }}
-          {% elif item.number == stock_page.number %}
-            <span class="this-page">{{ item.number }}</span>
-          {% else %}
-            <a href="{{ item.url }}"{% if item.number == stock_page.paginator.num_pages %} class="end"{% endif %}>{{ item.number }}</a>
-          {% endif %}
-        {% endfor %}
-      {% endif %}
-      {{ stock_page.paginator.count }} product{{ stock_page.paginator.count|pluralize }}, closest to running out first
-    </p>
-    <p class="hint">
-      {# The period is glued to {% endif %} on purpose: a line break here renders as a space before it. #}
-      {{ stock_age.available }} unit{{ stock_age.available|pluralize }} free{% if stock_age.oldest_days %},
-        oldest sitting {{ stock_age.oldest_days }} day{{ stock_age.oldest_days|pluralize }}{% endif %}.
-      Units that predate the counter carry the date it was deployed, so that age is a floor.
-    </p>
-  </div>
-
   <div class="stats-block">
     <h2>Top products</h2>
     <div class="scroll">

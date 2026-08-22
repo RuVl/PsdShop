@@ -98,10 +98,11 @@ Lint/format is **`uvx ruff@0.15.12`**; ruff config lives in `backend/pyproject.t
 **line-length 120**, `target-version = "py313"`, rule set `E, F, I, UP, B, W, C4, SIM`. pre-commit
 lives at the **repo root** (`.pre-commit-config.yaml`, run via `uvx pre-commit`): ruff-check
 `--fix` + ruff-format; mypy is commented out. Tests live in `catalog/tests.py`,
-`customer/tests.py`, `mailing/tests.py`, `sales/tests.py` and `sales/tests_statistics.py` (django
-`TestCase`, run with `make test` / `make dev-test`) and cover the checkout/callback/delivery
-invariants - keep them green. `sales/tests_statistics.py` is deliberately separate: it holds the
-arithmetic behind the dashboard, not the fulfillment invariants. Target runtime is **Python 3.13**.
+`content/tests.py`, `customer/tests.py`, `mailing/tests.py`, `sales/tests.py` and
+`sales/tests_statistics.py` (django `TestCase`, run with `make test` / `make dev-test`) and cover
+the checkout/callback/delivery invariants - keep them green. `sales/tests_statistics.py` is
+deliberately separate: it holds the arithmetic behind the dashboard, not the fulfillment
+invariants. Target runtime is **Python 3.13**.
 
 ## Environment & configuration
 
@@ -404,5 +405,5 @@ postgres in docker:
   Conventional-Commit message:** `type(scope): что сделал` in Russian, past tense. Types: `feat`,
   `fix`, `refactor`, `style`, `docs`, `ci`, `test`, `chore`. Scopes: `catalog`, `customer`, `sales`,
   `backend`, `frontend`, `mail`, `Makefile`, `deps`, etc. Example:
-  `ci(Makefile): добавил dev-цели для локального запуска`. This is a recap of the work performed -
+  `ci(Makefile): added dev targets for local runs`. This is a recap of the work performed -
   **not** an instruction to create a git commit.

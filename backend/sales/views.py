@@ -8,18 +8,19 @@ from django import views
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import transaction
-from django.db.models import Prefetch
 from django.http import FileResponse, HttpResponseNotFound
 from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from catalog.models import Product
 from customer.models import Customer
-from sales.models import Allocation, Order, PaymentCallbackLog, Transaction
+from sales.models import Order, OrderItem, PaymentCallbackLog, Transaction
 from sales.plisio import apply_order_status, callback_to_fields
 from sales.serializers import (
-    AllocationSerializer,
+    CartItemSerializer,
     OrderSerializer,
+    PurchaseItemSerializer,
     PurchaseOrderSerializer,
     SendDownloadLinksSerializer,
 )
@@ -49,7 +50,7 @@ class OrderCreateView(APIView):
 
         if serializer.reused_order is not None:
             # Same customer, same cart, invoice still alive: send them back to it instead of
-            # reserving a second copy of the same units.
+            # minting a second invoice for the same purchase.
             logger.info(f"Order {order.id} reused for a repeated checkout")
             return Response({"redirect_url": order.invoice_url}, status=status.HTTP_201_CREATED)
 
@@ -57,8 +58,8 @@ class OrderCreateView(APIView):
         invoice_data = {
             "order_name": f"Order {order.id}",
             "order_number": order.id,
-            "source_currency": order.total_price.currency,
-            "source_amount": order.total_price.amount,
+            "source_currency": "USD",
+            "source_amount": order.total_price,
             "email": order.customer.email,
             "api_key": settings.PLISIO_SECRET_KEY,
             "language": PLISIO_LANGUAGES.get(order.customer.language, "en_US"),
@@ -91,7 +92,7 @@ class OrderCreateView(APIView):
         http_status = response.status_code if response is not None else None
         logger.error(f"Invoice not created for order {order.id}: HTTP {http_status}, payload {payload}")
 
-        # Deleting the order takes its allocations with it, so the units are free again.
+        # Nothing was handed over and no invoice exists, so the order is just noise - drop it.
         order.delete()
 
         return Response(
@@ -137,21 +138,12 @@ class PlisioCallbackView(APIView):
             logger.warning(f"Callback for unknown order {data.get('order_number')}")
             return Response({"detail": "Order not found"}, status=status.HTTP_404_NOT_FOUND)
 
-        allocations = []
-        first_payment = False
-
-        try:
-            with transaction.atomic():
-                self.upsert_transaction(order, data)
-                first_payment, allocations = apply_order_status(order, data.get("status"))
-        except ValueError as e:
-            # Only one thing raises here now: the order is paid but stock ran out while the payment
-            # was pending. Everything rolls back, so Plisio can retry once stock is refilled.
-            logger.warning(f"Callback for order {order.id} could not be applied: {e}")
-            return Response({"detail": "Order processing conflict"}, status=status.HTTP_409_CONFLICT)
+        with transaction.atomic():
+            self.upsert_transaction(order, data)
+            first_payment, items = apply_order_status(order, data.get("status"))
 
         # A duplicate callback delivers nothing new and must not send a second email.
-        if first_payment and allocations:
+        if first_payment and items:
             customer = order.customer
             # Deliberately not a rotation: a second purchase must not revoke the link the customer
             # got with the first one and may still have open.
@@ -160,9 +152,9 @@ class PlisioCallbackView(APIView):
             try:
                 send_purchases_link(request, customer)
             except Exception as e:
-                # The sale itself went through and the files are allocated - failing the callback
-                # here would only make Plisio retry, and the retry sends nothing because paid_at is
-                # already stamped. The customer gets their link from the form on the site.
+                # The sale itself went through and the files are handed over - failing the
+                # callback here would only make Plisio retry, and the retry sends nothing because
+                # paid_at is already stamped. The customer gets their link from the form on the site.
                 logger.error(f"Order {order.id} is delivered but the e-mail did not go out: {e}")
 
         return Response(
@@ -193,22 +185,22 @@ class PlisioCallbackView(APIView):
         return txn
 
 
-def serve_allocation(allocation: Allocation, count: bool = True):
-    """Stream the file behind an allocation, or 404 - never say which of the checks failed."""
+def serve_order_item(item: OrderItem, count: bool = True):
+    """Stream the file behind one bought line, or 404 - never say which of the checks failed."""
 
-    if not allocation.is_token_valid():
+    if not item.is_token_valid():
         return HttpResponseNotFound("Expired download link")
 
-    if allocation.stock_item is None:
-        logger.error(f"Allocation {allocation.id} has no file to serve")
+    if not item.product.file:
+        logger.error(f"Order item {item.id} points at a product without a file")
         return HttpResponseNotFound()
 
     # noqa SIM115: FileResponse owns the handle and closes it when the stream ends - a `with` here
     # would close the file before a single byte went out.
-    response = FileResponse(open(allocation.stock_item.file.path, "rb"), as_attachment=True)  # noqa: SIM115
+    response = FileResponse(open(item.product.file.path, "rb"), as_attachment=True)  # noqa: SIM115
     if count:
         # Counted only once the file is actually open, so a 404 above never looks like a download.
-        allocation.record_download()
+        item.record_download()
     return response
 
 
@@ -221,8 +213,8 @@ class DownloadFileView(views.View):
             return HttpResponseNotFound()
 
         try:
-            allocation = Allocation.objects.select_related("stock_item").downloadable().get(token=token)
-        except (Allocation.DoesNotExist, ValidationError, ValueError):
+            item = OrderItem.objects.select_related("product").downloadable().get(token=token)
+        except (OrderItem.DoesNotExist, ValidationError, ValueError):
             return HttpResponseNotFound()
 
         # "Did the customer take the file" is what the counter answers, so the owner checking a file
@@ -230,9 +222,9 @@ class DownloadFileView(views.View):
         # member who opens a real customer link while logged into the admin is not counted either.
         staff = request.user.is_authenticated and request.user.is_staff
         if staff:
-            logger.info(f"Staff download of allocation {allocation.id}, not counted")
+            logger.info(f"Staff download of order item {item.id}, not counted")
 
-        return serve_allocation(allocation, count=not staff)
+        return serve_order_item(item, count=not staff)
 
 
 class SendDownloadLinksView(APIView):
@@ -302,20 +294,13 @@ class PurchasesView(APIView):
         if customer is None:
             return Response({"detail": PURCHASES_GONE}, status=status.HTTP_404_NOT_FOUND)
 
-        orders = (
-            customer.orders.paid()
-            .prefetch_related(
-                "items",
-                Prefetch("items__allocations", queryset=Allocation.objects.downloadable()),
-            )
-            .order_by("-paid_at", "-created_at")
-        )
+        orders = customer.orders.paid().prefetch_related("items").order_by("-paid_at", "-created_at")
 
         serializer = PurchaseOrderSerializer(orders, many=True, context={"request": request})
         return Response({"email": customer.email, "orders": serializer.data})
 
 
-class RefreshAllocationView(APIView):
+class RefreshOrderItemView(APIView):
     """New token for one file - what the "refresh link" button calls."""
 
     def post(self, request, *args, **kwargs):
@@ -324,16 +309,16 @@ class RefreshAllocationView(APIView):
             return Response({"detail": PURCHASES_GONE}, status=status.HTTP_404_NOT_FOUND)
 
         # Scoped to the customer, so a valid token cannot be used to refresh somebody else's file.
-        allocations = Allocation.objects.downloadable().of_customer(customer).filter(pk=kwargs.get("allocation_id"))
-        refreshed = allocations.reissue_tokens()
+        items = OrderItem.objects.downloadable().of_customer(customer).filter(pk=kwargs.get("item_id"))
+        refreshed = items.reissue_tokens()
         if not refreshed:
             return Response({"detail": "No such file in your purchases"}, status=status.HTTP_404_NOT_FOUND)
 
-        serializer = AllocationSerializer(refreshed[0], context={"request": request})
+        serializer = PurchaseItemSerializer(refreshed[0], context={"request": request})
         return Response(serializer.data)
 
 
-class RefreshAllAllocationsView(APIView):
+class RefreshAllOrderItemsView(APIView):
     """New tokens for every file of this customer, in one go."""
 
     def post(self, request, *args, **kwargs):
@@ -341,6 +326,24 @@ class RefreshAllAllocationsView(APIView):
         if customer is None:
             return Response({"detail": PURCHASES_GONE}, status=status.HTTP_404_NOT_FOUND)
 
-        refreshed = Allocation.objects.downloadable().of_customer(customer).reissue_tokens()
-        serializer = AllocationSerializer(refreshed, many=True, context={"request": request})
+        refreshed = OrderItem.objects.downloadable().of_customer(customer).reissue_tokens()
+        serializer = PurchaseItemSerializer(refreshed, many=True, context={"request": request})
+        return Response(serializer.data)
+
+
+class CartItemsView(APIView):
+    """
+    Products by id, for the cart that lives in the browser.
+
+    The cart is localStorage (ADR-0009), so the server cannot render it from state it does not
+    have - the page asks for the lines it holds. Unknown or deactivated ids are simply absent from
+    the answer, which is how the cart drops what is no longer on sale.
+    """
+
+    def get(self, request, *args, **kwargs):
+        raw = request.query_params.get("ids", "")
+        ids = [int(chunk) for chunk in raw.split(",") if chunk.strip().isdigit()][: settings.MAX_ORDER_ITEMS]
+
+        products = Product.objects.active().filter(pk__in=ids).prefetch_related("images")
+        serializer = CartItemSerializer(products, many=True, context={"request": request})
         return Response(serializer.data)

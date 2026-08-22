@@ -7,7 +7,7 @@ a figure means.
 
 Two conventions run through all of it:
 
-- **Money is the price snapshot.** `OrderItem.unit_price_usd` is what the customer was actually
+- **Money is the price snapshot.** `OrderItem.unit_price` is what the customer was actually
   charged, so a later edit of the catalogue price cannot rewrite last month's revenue.
 - **A sale is `Order.paid_at`.** The same stamp `CustomerQuerySet.buyers()` keys off, written
   exactly once by `Order.mark_paid()`. PAID and OVERPAID are one thing here.
@@ -22,13 +22,12 @@ from decimal import Decimal
 from django.db.models import Aggregate, Avg, Count, DecimalField, DurationField, F, Min, Q, Sum
 from django.db.models.functions import Coalesce, TruncDay
 
-from catalog.models import Product, StockItem
 from customer.models import Customer
-from sales.models import Allocation, Order, OrderItem, PaymentCallbackLog, Transaction
+from sales.models import Order, OrderItem, PaymentCallbackLog, Transaction
 
-# How long an order may take to pay before its reservation is gone and the stock had to be handed
-# out again. Taken from the model, not written out again, so the two cannot drift apart.
-RESERVATION_WINDOW = Order.RESERVATION_FROM_UPDATED
+# How long an order may take to pay before the invoice it was sent to is dead and the customer
+# has to start over. Taken from the model, not written out again, so the two cannot drift apart.
+INVOICE_WINDOW = Order.INVOICE_FROM_UPDATED
 
 # The invoices somebody paid. `mismatch` is Plisio's word for a sum that did not match the invoice;
 # we hand the files over for it and stamp paid_at, so its revenue is in `gross` - and its
@@ -38,10 +37,6 @@ PAID_INVOICES = (Transaction.TransactionStatus.COMPLETED, Transaction.Transactio
 # The callback statuses that mean the money is on its way but the chain has not confirmed it yet -
 # the middle of the walk from a freshly minted invoice to a paid order.
 PENDING_INVOICES = (Transaction.TransactionStatus.PENDING, Transaction.TransactionStatus.PENDING_INTERNAL)
-
-# The window the stock forecast measures the sales rate over, regardless of the page's period:
-# "will it last" is a question about now, not about the range being browsed.
-SALES_RATE_DAYS = 30
 
 # Days behind each point that the trend line averages over.
 TREND_WINDOW = 7
@@ -129,7 +124,9 @@ def sold_items(period: Period):
 
 
 def _line_total():
-    return Sum(F("unit_price_usd") * F("quantity"), output_field=MONEY)
+    """One line is one file at its snapshot price - there is no quantity to multiply by."""
+
+    return Sum("unit_price", output_field=MONEY)
 
 
 def revenue_by_day(period: Period) -> list[dict]:
@@ -210,7 +207,7 @@ def top_products(period: Period, limit: int | None = 10) -> list[dict]:
     return list(
         sold_items(period)
         .values("product_name")
-        .annotate(revenue=_line_total(), units=Sum("quantity"))
+        .annotate(revenue=_line_total(), units=Count("pk"))
         .order_by("-revenue")[:limit]
     )
 
@@ -222,74 +219,9 @@ def top_countries(period: Period, limit: int = 10) -> list[dict]:
         sold_items(period)
         .filter(product__country__isnull=False)
         .values("product__country__name")
-        .annotate(revenue=_line_total(), units=Sum("quantity"))
+        .annotate(revenue=_line_total(), units=Count("pk"))
         .order_by("-revenue")[:limit]
     )
-
-
-def stock_forecast(now: datetime) -> list[dict]:
-    """
-    What is left of each product and how long it lasts at the recent rate.
-
-    The only block on the page that is about right now rather than about the period: the answer to
-    "what do I buy next" cannot depend on which range somebody happens to be browsing.
-    """
-
-    since = now - timedelta(days=SALES_RATE_DAYS)
-    sold = (
-        OrderItem.objects.filter(order__paid_at__gte=since)
-        .values("product_id")
-        .annotate(units=Sum("quantity"))
-        .order_by()
-    )
-    sold_by_product = {row["product_id"]: row["units"] for row in sold}
-
-    rows = []
-    for product in Product.objects.with_available().select_related("country"):
-        units = sold_by_product.get(product.pk, 0)
-        rate = Decimal(units) / Decimal(SALES_RATE_DAYS)
-        rows.append(
-            {
-                "product": product.name,
-                "country": product.country.name if product.country_id else "-",
-                "available": product.available,
-                "sold": units,
-                "rate": rate,
-                # Nothing selling means nothing running out - an infinite runway, not a crash.
-                "days_left": (Decimal(product.available) / rate) if rate else None,
-            }
-        )
-
-    # Sorted by what it costs to ignore the row. Anything that still sells comes first, soonest
-    # to run out at the top - a sold-out seller is a zero and heads the list. Products that have
-    # not sold in the window have no runway to compare, so they follow, most stock first: that is
-    # money sitting still. A product that is both out of stock and not selling is last - there is
-    # nothing to lose and nothing to buy.
-    return sorted(
-        rows,
-        key=lambda row: (
-            row["days_left"] is None,
-            row["days_left"] if row["days_left"] is not None else 0,
-            -row["available"],
-        ),
-    )
-
-
-def stock_age(now: datetime) -> dict:
-    """
-    How long the units currently in stock have been sitting there.
-
-    Units that predate the field carry the date of the migration, so the oldest age reads as "at
-    least this long" until that generation is sold through.
-    """
-
-    units = StockItem.objects.available()
-    oldest = units.order_by("created_at").values_list("created_at", flat=True).first()
-
-    return {
-        "available": units.count(),
-        "oldest_days": (now - oldest).days if oldest else None,
-    }
 
 
 def funnel(period: Period) -> Funnel:
@@ -311,17 +243,17 @@ def funnel(period: Period) -> Funnel:
 
 def time_to_pay(period: Period) -> dict:
     """
-    How long customers take to pay, and how many took longer than the reservation lasts.
+    How long customers take to pay, and how many took longer than the invoice lives.
 
-    A late payment is not a lost sale - `Order.deliver()` re-allocates from stock - but every one
-    of them is a unit that sat locked and then had to be found again.
+    A late payment still goes through - nothing is held and nothing expires on our side - but it
+    means the customer came back to an invoice Plisio had already given up on.
     """
 
     orders = paid_orders(period).annotate(took=F("paid_at") - F("created_at"))
     stats = orders.aggregate(
         median=Median("took", output_field=DurationField()),
         average=Avg("took"),
-        late=Count("pk", filter=Q(took__gt=RESERVATION_WINDOW)),
+        late=Count("pk", filter=Q(took__gt=INVOICE_WINDOW)),
         total=Count("pk"),
     )
 
@@ -421,7 +353,7 @@ def repeat_customers(period: Period, limit: int = 10) -> dict:
         paid_orders=Count("orders", filter=Q(orders__paid_at__isnull=False), distinct=True),
         spent=Coalesce(
             Sum(
-                F("orders__items__unit_price_usd") * F("orders__items__quantity"),
+                F("orders__items__unit_price"),
                 filter=Q(orders__paid_at__isnull=False),
                 output_field=MONEY,
             ),
@@ -459,14 +391,13 @@ def download_rate(period: Period) -> dict:
     """
     How much of what was handed over was actually collected.
 
-    The counter only exists from the release that added it, so allocations delivered before then
-    read as never downloaded. The page says as much next to the figure.
+    Counted over the lines of orders paid inside the period: a line is handed over the moment its
+    order is paid, so "delivered" and "paid" are the same instant now that nothing is reserved.
     """
 
-    delivered = Allocation.objects.filter(
-        state=Allocation.State.DELIVERED,
-        delivered_at__gte=period.start,
-        delivered_at__lt=period.end,
+    delivered = OrderItem.objects.filter(
+        order__paid_at__gte=period.start,
+        order__paid_at__lt=period.end,
     )
     stats = delivered.aggregate(
         total=Count("pk"),

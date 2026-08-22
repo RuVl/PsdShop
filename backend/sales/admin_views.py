@@ -10,7 +10,6 @@ from datetime import UTC, date, datetime, time, timedelta
 from decimal import Decimal
 
 from django.contrib import admin
-from django.core.paginator import Paginator
 from django.http import HttpResponse
 from django.template.response import TemplateResponse
 from django.urls import reverse
@@ -24,9 +23,6 @@ from sales.statistics import Period
 # Presets offered above the page, as (value, label). "all" starts at the first sale.
 PRESETS = [("7", "7 days"), ("30", "30 days"), ("90", "90 days"), ("365", "Year"), ("all", "All time")]
 DEFAULT_PRESET = "30"
-
-# Rows of the stock forecast per page; the page is picked with `?stock_page=`.
-STOCK_PER_PAGE = 20
 
 
 def parse_period(request) -> Period:
@@ -70,7 +66,6 @@ def _as_utc(day) -> datetime:
 
 
 def _collect(period: Period) -> dict:
-    now = timezone.now()
     return {
         "period": period,
         "presets": PRESETS,
@@ -78,14 +73,11 @@ def _collect(period: Period) -> dict:
         "revenue": statistics.revenue_by_day(period),
         "top_products": statistics.top_products(period),
         "top_countries": statistics.top_countries(period),
-        "stock": statistics.stock_forecast(now),
-        "stock_age": statistics.stock_age(now),
         "funnel": statistics.funnel(period),
         "time_to_pay": statistics.time_to_pay(period),
         "stages": statistics.payment_stages(period),
         "customers": statistics.repeat_customers(period),
         "downloads": statistics.download_rate(period),
-        "sales_rate_days": statistics.SALES_RATE_DAYS,
     }
 
 
@@ -105,32 +97,7 @@ def statistics_view(request):
     context["has_sales"] = context["totals"].orders > 0
     context["query"] = request.GET.urlencode()
 
-    # The forecast is sorted by urgency, so page one is the part that needs acting on - but a
-    # catalogue of a thousand products has to be walkable, not truncated.
-    context.update(_paginate_stock(request, context["stock"]))
-
     return TemplateResponse(request, "admin/sales/statistics.html", {**admin.site.each_context(request), **context})
-
-
-def _paginate_stock(request, rows: list[dict]) -> dict:
-    """
-    One page of the stock forecast, plus the links to walk it.
-
-    `get_page` swallows a missing, non-numeric or out-of-range page the way the rest of the
-    querystring is handled here: a bookmarked URL shows a page, never an error.
-    """
-
-    paginator = Paginator(rows, STOCK_PER_PAGE)
-    page = paginator.get_page(request.GET.get("stock_page"))
-
-    # The same elided range the admin's own changelist paginator is built from, so the markup
-    # below it can reuse the admin's .paginator styles and behave the way a changelist does.
-    numbers = [
-        {"number": number, "url": "" if number == paginator.ELLIPSIS else _with_param(request, stock_page=number)}
-        for number in paginator.get_elided_page_range(page.number, on_each_side=2, on_ends=1)
-    ]
-
-    return {"stock_page": page, "stock_page_numbers": numbers, "stock_ellipsis": paginator.ELLIPSIS}
 
 
 def _orders_of(day: date) -> str:
@@ -148,23 +115,12 @@ def _orders_of(day: date) -> str:
     return f"{reverse('admin:sales_order_changelist')}?{query}"
 
 
-def _with_param(request, **params) -> str:
-    """The current querystring with a parameter added, so a link keeps the period it was clicked on."""
-
-    query = request.GET.copy()
-    for name, value in params.items():
-        # Assignment, not update(): a QueryDict's update appends to the existing values.
-        query[name] = value
-
-    return f"?{query.urlencode()}"
-
-
 def statistics_csv_view(request):
     """
-    The same period as the page, in four blocks.
+    The same period as the page, in three blocks.
 
-    The page shows the top ten and one page of stock because a screen has to be readable; the
-    export is where the whole catalogue goes, because that is what a spreadsheet is for.
+    The page shows the top ten because a screen has to be readable; the export is where every
+    product sold in the period goes, because that is what a spreadsheet is for.
     """
 
     period = parse_period(request)
@@ -189,15 +145,6 @@ def statistics_csv_view(request):
     writer.writerow(["product", "units", "gross_usd"])
     for row in statistics.top_products(period, limit=None):
         writer.writerow([row["product_name"], row["units"], _money(row["revenue"])])
-
-    writer.writerow([])
-    writer.writerow([f"Stock right now - every product, at the last {statistics.SALES_RATE_DAYS} days of sales"])
-    writer.writerow(["product", "country", "available", f"sold_{statistics.SALES_RATE_DAYS}d", "days_left"])
-    for row in statistics.stock_forecast(timezone.now()):
-        # An empty cell, not a zero: nothing selling means no runway to report, and a 0 there
-        # would read as "out tomorrow" - the opposite.
-        days_left = f"{row['days_left']:.0f}" if row["days_left"] is not None else ""
-        writer.writerow([row["product"], row["country"], row["available"], row["sold"], days_left])
 
     writer.writerow([])
     writer.writerow(["gross_usd", "plisio_commission_usd", "net_usd", "paid_orders"])
