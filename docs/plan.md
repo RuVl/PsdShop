@@ -91,6 +91,21 @@ Vanilla, без Vue: бургер, приветственный слайдер (
 перехватывает её, тянет тот же URL с `?partial=1`, подменяет `.products-list` и двигает историю
 через `pushState`. Робот идёт по ссылкам, человек не видит перезагрузок.
 
+### Файлы
+
+Загрузки лежат на одном томе `products`, но разделены по доступу:
+
+```
+backend/products/media/     превью товаров и картинки слайдов - MEDIA_ROOT, отдаёт nginx (/media/)
+backend/products/private/   платные файлы - PRODUCT_FILES_ROOT, ни один location туда не смотрит
+```
+
+Платный файл уезжает в `private/` через `catalog/storages.py: ProductFilesStorage`: у хранилища
+нет `base_url`, поэтому `product.file.url` кидает `ValueError`, а не отдаёт путь. Единственный
+способ получить файл - `DownloadFileView` по токену. В разработке `MEDIA_URL` отдаёт сам Django
+(`static()` в `backend/urls.py`), в проде - `location /media/` с томом, смонтированным в nginx
+только на чтение.
+
 ### Статика
 
 `design/style.css`, `img/`, `fonts/` переезжают в `backend/storefront/static/storefront/` как есть.
@@ -197,6 +212,11 @@ description, карта сайта валидна и содержит обе я�
 _Готово, когда:_ `make lint` и тесты зелёные, в коде нет упоминаний стока и валютных курсов.
 
 Порядок строгий: M1 → M2 → M3 → M4 → M5. Каждый этап — своя ветка `feature/...` с PR в `dev`.
+
+Миграции M1 переписаны с нуля, поэтому уже смигрированная dev-БД на них падает
+(`InconsistentMigrationHistory`). Обновляться нужно через `make dev-nuke` — цель удаляет том
+`psdshop_postgres` вместе с данными, в отличие от `dev-reset`, который пересоздаёт только
+контейнер. После неё: `make dev-migrate` и `make dev-manage c="seed_testdata --flush"`.
 
 ## 6. Как проверять
 

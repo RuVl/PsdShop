@@ -56,6 +56,9 @@ MIDDLEWARE = [
     "corsheaders.middleware.CorsMiddleware",
     "django.middleware.security.SecurityMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
+    # Picks the language off the URL prefix (/en/, /ru/) and falls back to Accept-Language. The
+    # storefront is server-rendered, so the page language has to be active during the response.
+    "django.middleware.locale.LocaleMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
@@ -190,12 +193,18 @@ TIME_ZONE = "UTC"
 STATIC_URL = "static/"
 STATIC_ROOT = BASE_DIR / "static"
 
-# Uploaded product files and images. The root is `products/` because that is the path the compose
-# volume is mounted on; `upload_to` adds `files/` or `images/` under it. nginx serves MEDIA_URL
-# from the same volume - the product file itself is never reached that way, it is streamed by
-# DownloadFileView behind a token.
+# Uploads live on the `products` volume, split by who is allowed to read them.
+#
+# `media/` is public: product previews and slide images, served by nginx straight off the volume
+# (`location /media/` in frontend/nginx/site-body.conf) and by Django itself under DEBUG.
+#
+# `private/` holds the paid files and is deliberately outside MEDIA_ROOT, so no URL maps onto it -
+# a product file is only ever reached through DownloadFileView, behind a token. The storage below
+# has no `base_url` either, so `product.file.url` raises instead of quietly handing out a path
+# (see catalog/storages.py).
 MEDIA_URL = "/media/"
-MEDIA_ROOT = BASE_DIR / "products"
+MEDIA_ROOT = BASE_DIR / "products" / "media"
+PRODUCT_FILES_ROOT = BASE_DIR / "products" / "private"
 
 # Plisio token
 PLISIO_SECRET_KEY = env("PLISIO_SECRET_KEY")
