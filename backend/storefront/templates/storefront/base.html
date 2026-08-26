@@ -1,0 +1,78 @@
+{% load static i18n storefront %}<!DOCTYPE html>
+<html lang="{{ LANGUAGE_CODE }}">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}{% translate "PDF document store" %}{% endblock %}</title>
+    <link rel="stylesheet" href="{% static 'storefront/css/style.css' %}">
+    {% block extra_head %}{% endblock %}
+</head>
+<body id="body">
+<header class="header">
+    <div class="container">
+        <div class="header__body">
+            <a href="{% url 'storefront:home' %}" class="logo opacity">
+                <picture class="logo__img"><img src="{% static 'storefront/img/icons/logo.png' %}" alt="Logo icon"></picture>
+            </a>
+            <div class="header__block">
+                <ul class="menu">
+                    <li class="menu__item white link-primary"><a href="{% url 'storefront:home' %}">{% translate "Home" %}</a></li>
+                    <li class="menu__item white link-primary"><a href="#">{% translate "Rules" %}</a></li>
+                    <li class="menu__item white link-primary"><a href="#">{% translate "Contacts" %}</a></li>
+                </ul>
+                <a class="header-cart white link-primary" href="#" title="{% translate 'Cart' %}">
+                    <span class="icon-cart"></span>
+                    <span id="cart-counter" class="badge text-small primary" hidden></span>
+                </a>
+                {% get_current_language as current_lang %}
+                {% get_available_languages as languages %}
+                {% for code, name in languages %}{% if code != current_lang %}
+                    <a class="lang opacity" href="{% switch_language_url code %}">{{ code|upper }}</a>
+                {% endif %}{% endfor %}
+            </div>
+            <div class="header__mobile">
+                {% for code, name in languages %}{% if code != current_lang %}
+                    <a class="lang opacity" href="{% switch_language_url code %}">{{ code|upper }}</a>
+                {% endif %}{% endfor %}
+                <button type="button" class="btn-reset burger">
+                    <span class="burger-icon"></span>
+                </button>
+            </div>
+        </div>
+    </div>
+</header>
+
+{% block content %}{% endblock %}
+
+<footer class="footer" id="footer">
+    <div class="container">
+        <div class="footer__body">
+            <div class="footer__block">
+                <a href="{% url 'storefront:home' %}" class="logo opacity">
+                    <picture class="logo__img"><img src="{% static 'storefront/img/icons/logo-footer.png' %}" alt="Logo icon"></picture>
+                </a>
+                {% if site_settings.footer_note %}<p class="text-small black">{{ site_settings.footer_note }}</p>{% endif %}
+            </div>
+            <div class="footer__block">
+                <div class="footer__title title black upper">{% translate "Links" %}</div>
+                <div class="footer__menu">
+                    <ul class="footer__list">
+                        <li class="footer__item text black link-primary"><a href="{% url 'storefront:home' %}">{% translate "Home" %}</a></li>
+                        <li class="footer__item text black link-primary"><a href="#">{% translate "Contacts" %}</a></li>
+                        <li class="footer__item text black link-primary"><a href="#">{% translate "Rules" %}</a></li>
+                    </ul>
+                </div>
+            </div>
+            <div class="footer__block">
+                {% if site_settings.support_url %}
+                    <a class="btn btn-grade btn-big text white opacity" href="{{ site_settings.support_url }}" target="_blank" rel="noopener">{% translate "Contact support" %}</a>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</footer>
+
+<script type="module" src="{% static 'storefront/js/cart-counter.js' %}"></script>
+{% block islands %}{% endblock %}
+</body>
+</html>

@@ -16,15 +16,24 @@ Including another URLconf
 """
 
 from django.conf import settings
+from django.conf.urls.i18n import i18n_patterns
 from django.conf.urls.static import static
 from django.contrib import admin
 from django.urls import include, path
 
+# No language prefix: the admin, the API and the Plisio callback are not part of the storefront.
 urlpatterns = [
     path("admin/", admin.site.urls),
     path("api/", include("mailing.urls")),
     path("api/", include("sales.urls")),
 ]
+
+# The storefront is server-rendered and bilingual: the language lives in the path (/en/, /ru/), and
+# the bare root 302-redirects to the visitor's language (LocaleMiddleware + prefix_default_language).
+urlpatterns += i18n_patterns(
+    path("", include("storefront.urls")),
+    prefix_default_language=True,
+)
 
 # Product previews and slide images, development only - in production nginx serves them off the
 # volume. MEDIA_ROOT holds nothing else: the paid files sit in PRODUCT_FILES_ROOT, outside it, and

@@ -1,3 +1,4 @@
+import sys
 from datetime import timedelta
 from pathlib import Path
 
@@ -45,6 +46,7 @@ INSTALLED_APPS = [
     "rest_framework",
     "corsheaders",
     "tinymce",
+    "storefront",
     "catalog",
     "content",
     "customer",
@@ -79,6 +81,7 @@ TEMPLATES = [
                 "django.template.context_processors.request",
                 "django.contrib.auth.context_processors.auth",
                 "django.contrib.messages.context_processors.messages",
+                "storefront.context_processors.site_settings",
             ],
         },
     },
@@ -192,6 +195,25 @@ TIME_ZONE = "UTC"
 # Static files (CSS, JavaScript, Images)
 STATIC_URL = "static/"
 STATIC_ROOT = BASE_DIR / "static"
+
+# Hash static file names on collectstatic so a changed asset busts its own cache - the storefront
+# CSS and the vite-built islands are referenced through {% static %}, which rewrites to the hashed
+# name. Every url() inside style.css must resolve at collectstatic or the manifest build fails.
+#
+# The manifest only exists after collectstatic, and hashed names break tests that assert on a
+# literal filename - so hashing is on for production alone. Local dev (DEBUG) and the test run use
+# the plain storage, which needs no manifest.
+_hash_static = not DEBUG and "test" not in sys.argv
+STORAGES = {
+    "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
+    "staticfiles": {
+        "BACKEND": (
+            "backend.staticfiles.StorefrontStaticFilesStorage"
+            if _hash_static
+            else "django.contrib.staticfiles.storage.StaticFilesStorage"
+        )
+    },
+}
 
 # Uploads live on the `products` volume, split by who is allowed to read them.
 #
