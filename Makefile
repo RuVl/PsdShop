@@ -273,6 +273,14 @@ dev-frontend: ## Vite dev-сервер (0.0.0.0:5173)
 dev-frontend-build: ## Production-сборка фронтенда
 	cd frontend && npm run build
 
+.PHONY: islands
+islands: ## Собрать vite-острова витрины в backend/storefront/static/storefront/js
+	cd frontend && npm run build
+
+.PHONY: dev-islands
+dev-islands: ## Собирать острова в watch-режиме (для локальной разработки витрины)
+	cd frontend && npm run build -- --watch
+
 # --- Качество кода ----------------------------------------------------------
 
 .PHONY: pre-commit-install
