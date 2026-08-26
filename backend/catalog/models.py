@@ -183,30 +183,20 @@ class Product(MetaTagsMixin):
             models.Index(fields=["year"]),
         ]
 
-    # What the row held when it was read. Empty on a new instance, so a first save never mistakes
-    # its own upload for a replacement - the name a colliding upload gets belongs to someone else.
-    _stored_file = ""
-
-    @classmethod
-    def from_db(cls, db, field_names, values):
-        instance = super().from_db(db, field_names, values)
-        instance._stored_file = instance.file.name
-        return instance
-
     def __str__(self):
         return self.name
 
     def save(self, *args, **kwargs):
-        replaced = self._stored_file and self.file.name != self._stored_file
+        # What the row held before this save; None on a new instance, so a first save never mistakes
+        # its own upload for a replacement.
+        previous = type(self).objects.filter(pk=self.pk).values_list("file", flat=True).first() if self.pk else None
 
         super().save(*args, **kwargs)
 
         # A replaced file is unreachable the moment the row points elsewhere, and it is the one
         # upload here that is measured in megabytes.
-        if replaced:
-            self.file.storage.delete(self._stored_file)
-
-        self._stored_file = self.file.name if self.file else ""
+        if previous and previous != self.file.name:
+            self.file.storage.delete(previous)
 
     @property
     def url_slug(self) -> str:
@@ -255,31 +245,22 @@ class ProductImage(models.Model):
         verbose_name_plural = _("Product images")
         ordering = ["position", "pk"]
 
-    # The original this row was read with; see the note on Product._stored_file.
-    _source_name = ""
-
-    @classmethod
-    def from_db(cls, db, field_names, values):
-        instance = super().from_db(db, field_names, values)
-        instance._source_name = instance.image.name
-        return instance
-
     def __str__(self):
         return f"{self.product_id} - {self.image.name}"
 
     def save(self, *args, **kwargs):
-        replaced = self._source_name and self.image.name != self._source_name
+        # The original this row held before this save; None on a new instance. See Product.save.
+        previous = type(self).objects.filter(pk=self.pk).values_list("image", flat=True).first() if self.pk else None
+        replaced = bool(previous) and self.image.name != previous
 
         super().save(*args, **kwargs)
 
         if self.image and (replaced or not self.card):
             # The previous original is nobody's now - the variants are rebuilt from the new one.
             if replaced:
-                self.image.storage.delete(self._source_name)
+                self.image.storage.delete(previous)
 
             self.build_variants()
-
-        self._source_name = self.image.name if self.image else ""
 
     def build_variants(self):
         """(Re)generate every variant from the original. Old files are dropped first."""
