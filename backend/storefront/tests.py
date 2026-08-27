@@ -67,15 +67,6 @@ class CatalogViewTests(TempUploadsMixin, TestCase):
         response = self.client.get("/en/germany/bank-statement/")
         self.assertEqual(len(response.context["products"]), 1)
 
-    def test_year_filter(self):
-        response = self.client.get("/en/germany/utility-bill/?year=2023")
-        self.assertEqual(len(response.context["products"]), 1)
-
-    def test_year_list_ignores_year_selection(self):
-        # Picking a year must not shrink the year dropdown itself.
-        response = self.client.get("/en/germany/utility-bill/?year=2022")
-        self.assertEqual(response.context["years"], [2023, 2022])
-
     def test_unknown_country_404(self):
         self.assertEqual(self.client.get("/en/atlantis/all/").status_code, 404)
 

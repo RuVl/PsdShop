@@ -24,16 +24,10 @@
                     <span class="icon-cart"></span>
                     <span id="cart-counter" class="badge text-small primary" hidden></span>
                 </a>
-                {% get_current_language as current_lang %}
-                {% get_available_languages as languages %}
-                {% for code, name in languages %}{% if code != current_lang %}
-                    <a class="lang opacity" href="{% switch_language_url code %}">{{ code|upper }}</a>
-                {% endif %}{% endfor %}
+                {% include "storefront/_lang_switch.html" %}
             </div>
             <div class="header__mobile">
-                {% for code, name in languages %}{% if code != current_lang %}
-                    <a class="lang opacity" href="{% switch_language_url code %}">{{ code|upper }}</a>
-                {% endif %}{% endfor %}
+                {% include "storefront/_lang_switch.html" %}
                 <button type="button" class="btn-reset burger">
                     <span class="burger-icon"></span>
                 </button>

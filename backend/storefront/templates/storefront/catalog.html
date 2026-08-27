@@ -77,18 +77,6 @@
                         <div class="filter-products">
                             <div class="text-small black">{% translate "Filter products" %}</div>
                             <div class="filter-products-content">
-                                {% if years %}
-                                <div class="select-option filter-products-year">
-                                    <div class="filter-products-card-list">
-                                        <a class="filter-products-card-list-item filter-products-btn {% if not selected_year %}current{% endif %}"
-                                           href="{% url 'storefront:catalog' country=country_slug doctype=type_slug %}">{% translate "Any year" %}</a>
-                                        {% for year in years %}
-                                        <a class="filter-products-card-list-item filter-products-btn {% if selected_year == year|stringformat:'s' %}current{% endif %}"
-                                           href="{% url 'storefront:catalog' country=country_slug doctype=type_slug %}?year={{ year }}">{{ year }}</a>
-                                        {% endfor %}
-                                    </div>
-                                </div>
-                                {% endif %}
                                 <div class="filter-products-right">
                                     <div class="filter-products-card-list">
                                         <a class="filter-products-card-list-item filter-products-btn {% if not selected_type %}current{% endif %}"
@@ -113,11 +101,11 @@
                         {% if page_obj.has_other_pages %}
                         <nav class="pagination">
                             {% if page_obj.has_previous %}
-                                <a class="btn text" href="?page={{ page_obj.previous_page_number }}{% if selected_year %}&year={{ selected_year }}{% endif %}">{% translate "Previous" %}</a>
+                                <a class="btn text" href="?page={{ page_obj.previous_page_number }}">{% translate "Previous" %}</a>
                             {% endif %}
                             <span class="text black">{{ page_obj.number }} / {{ page_obj.paginator.num_pages }}</span>
                             {% if page_obj.has_next %}
-                                <a class="btn text" href="?page={{ page_obj.next_page_number }}{% if selected_year %}&year={{ selected_year }}{% endif %}">{% translate "Next" %}</a>
+                                <a class="btn text" href="?page={{ page_obj.next_page_number }}">{% translate "Next" %}</a>
                             {% endif %}
                         </nav>
                         {% endif %}
