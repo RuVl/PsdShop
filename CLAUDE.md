@@ -51,7 +51,8 @@ make down          # stop; make ps / make logs[-backend|-db|-nginx]
 make dev-infra     # postgres only (docker-compose.dev.yaml), published to localhost:5432
 make dev-migrate   # migrate with the host backend against the dev db
 make dev-backend   # runserver 0.0.0.0:8000 on the host
-make dev-frontend  # vite dev server on 0.0.0.0:5173 (host); make dev-frontend-build for prod build
+make dev-frontend  # vite dev server on 0.0.0.0:5173 (host, for the Verdoc-era SPA)
+make islands / make dev-islands  # build the storefront vite islands into the backend static tree (--watch for dev)
 make dev-superuser / make dev-infra-down
 make dev-reset     # recreate the dev-postgres container (keeps the psdshop_postgres volume/data)
 make dev-nuke      # DROP the volume and bring an empty db up - needed after migrations are regenerated
