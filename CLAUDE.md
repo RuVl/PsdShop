@@ -104,9 +104,11 @@ Lint/format is **`uvx ruff@0.15.12`**; ruff config lives in `backend/pyproject.t
 **line-length 120**, `target-version = "py313"`, rule set `E, F, I, UP, B, W, C4, SIM`. pre-commit
 lives at the **repo root** (`.pre-commit-config.yaml`, run via `uvx pre-commit`): ruff-check
 `--fix` + ruff-format; mypy is commented out. Tests live in `catalog/tests.py`,
-`content/tests.py`, `customer/tests.py`, `mailing/tests.py`, `sales/tests.py` and
-`sales/tests_statistics.py` (django `TestCase`, run with `make test` / `make dev-test`) and cover
-the checkout/callback/delivery invariants - keep them green. `sales/tests_statistics.py` is
+`content/tests.py`, `customer/tests.py`, `mailing/tests.py`, `sales/tests.py`,
+`sales/tests_statistics.py` and `storefront/tests.py` (django `TestCase`, run with `make test` /
+`make dev-test`) and cover the checkout/callback/delivery invariants plus the UA split - keep
+them green. **The test targets name the apps explicitly**, so a new app must be added to both
+`test` and `dev-test` in the Makefile or its tests silently never run. `sales/tests_statistics.py` is
 deliberately separate: it holds the arithmetic behind the dashboard, not the fulfillment
 invariants. Target runtime is **Python 3.13**.
 

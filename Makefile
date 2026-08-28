@@ -187,7 +187,7 @@ dev-superuser: dev-infra ## Создать суперпользователя в
 
 .PHONY: dev-test
 dev-test: dev-infra dev-compilemessages ## Тесты локальным backend (t="sales.tests.DeliverTests" - только часть)
-	$(MANAGE_DEV) test $(if $(t),$(t),catalog customer mailing sales)
+	$(MANAGE_DEV) test $(if $(t),$(t),catalog content customer mailing sales storefront)
 
 .PHONY: dev-messages
 dev-messages: ## Пересобрать backend/locale/ru/.../django.po из исходников (нужен gettext)
@@ -208,12 +208,12 @@ migrate: ## Применить миграции
 	$(MANAGE) migrate
 
 .PHONY: makemigrations
-makemigrations: ## Создать миграции: make makemigrations m="catalog customer sales"
+makemigrations: ## Создать миграции: make makemigrations m="catalog content customer sales"
 	$(MANAGE) makemigrations $(m)
 
 .PHONY: test
 test: compilemessages ## Тесты в контейнере (t="sales" - только часть)
-	$(MANAGE) test $(if $(t),$(t),catalog customer mailing sales)
+	$(MANAGE) test $(if $(t),$(t),catalog content customer mailing sales storefront)
 
 .PHONY: collectstatic
 collectstatic: ## Собрать статику
