@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{% block title %}{% translate "PDF document store" %}{% endblock %}</title>
+    {% if storefront_meta %}{{ storefront_meta }}{% else %}<title>{% translate "PDF document store" %}</title>{% endif %}
     <link rel="stylesheet" href="{% static 'storefront/css/style.css' %}">
     {% block extra_head %}{% endblock %}
 </head>
@@ -20,10 +20,6 @@
                     <li class="menu__item white link-primary"><a href="#">{% translate "Rules" %}</a></li>
                     <li class="menu__item white link-primary"><a href="#">{% translate "Contacts" %}</a></li>
                 </ul>
-                <a class="header-cart white link-primary" href="#" title="{% translate 'Cart' %}">
-                    <span class="icon-cart"></span>
-                    <span id="cart-counter" class="badge text-small primary" hidden></span>
-                </a>
                 {% include "storefront/_lang_switch.html" %}
             </div>
             <div class="header__mobile">
@@ -66,7 +62,5 @@
     </div>
 </footer>
 
-<script type="module" src="{% static 'storefront/js/cart-counter.js' %}"></script>
-{% block islands %}{% endblock %}
 </body>
 </html>

@@ -1,17 +1,38 @@
-"""Server-rendered catalog: the home page and the country/type listing.
+"""The storefront's HTML, served two ways off the same URLs (dynamic rendering).
 
-The URL carries the filter (`/<lang>/<country>/<type>/`, `all` meaning "any"), the query string
-carries the page. Everything a card shows comes off the models directly - there is no JSON API for
-the listing (ADR-0009).
+A search bot gets the full server-rendered page; a person gets the SPA shell - the vite-built
+index.html with this page's meta rendered into <head> (`make spa` produces it). Both branches of
+a view share one queryset and one meta dict, which is what keeps them equivalent.
 """
+
+import logging
 
 from django.core.paginator import Paginator
 from django.shortcuts import get_object_or_404, redirect, render
+from django.template import TemplateDoesNotExist
+from django.template.loader import get_template
 
 from catalog.models import Country, DocumentType, Product
+from storefront import seo
+from storefront.bots import is_bot
 
-# Cards per page. The infinite scroll (M2b) requests the same `?page=N` behind the scenes.
+logger = logging.getLogger(__name__)
+
 PAGE_SIZE = 24
+
+SHELL_TEMPLATE = "storefront/shell.html"
+
+
+def _shell_available() -> bool:
+    try:
+        get_template(SHELL_TEMPLATE)
+    except TemplateDoesNotExist:
+        return False
+    return True
+
+
+def render_shell(request, meta):
+    return render(request, SHELL_TEMPLATE, {"storefront_meta": seo.render_meta(meta)})
 
 
 def catalog(request, country=None, doctype=None):
@@ -24,6 +45,15 @@ def catalog(request, country=None, doctype=None):
     selected_country = get_object_or_404(Country, slug=country) if country and country != "all" else None
     selected_type = get_object_or_404(DocumentType, slug=doctype) if doctype and doctype != "all" else None
 
+    meta = seo.catalog_meta(request, selected_country, selected_type)
+
+    if not is_bot(request) and _shell_available():
+        return render_shell(request, meta)
+    if not is_bot(request):
+        # No SPA build on disk: serve the bot page rather than a 500, but say so - in production
+        # this means the deploy skipped `make spa`.
+        logger.warning("SPA shell template missing; serving the server-rendered page to a person")
+
     products = Product.objects.active().for_listing()
     if selected_country:
         products = products.filter(country=selected_country)
@@ -33,6 +63,7 @@ def catalog(request, country=None, doctype=None):
     page = Paginator(products, PAGE_SIZE).get_page(request.GET.get("page"))
 
     context = {
+        "storefront_meta": seo.render_meta(meta),
         "products": page,
         "page_obj": page,
         "countries": Country.objects.non_empty(),
@@ -42,3 +73,13 @@ def catalog(request, country=None, doctype=None):
         "selected_type": selected_type,
     }
     return render(request, "storefront/catalog.html", context)
+
+
+def spa(request, **kwargs):
+    """Cart, purchases, unsubscribe - pages that exist only in the SPA.
+
+    Bots get the same shell: these are service pages, marked noindex, with nothing to rank.
+    The URL parameters belong to the SPA router; the view ignores them.
+    """
+
+    return render_shell(request, seo.service_meta(request))

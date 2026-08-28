@@ -22,12 +22,5 @@
             <div class="product-item-prop-label">{% translate "Price" %}</div>
             <div class="product-item-prop-content">$<span class="product-item-prop-value">{{ product.price }}</span></div>
         </div>
-        <div class="product-item-controls">
-            <button class="button" type="button" data-buy data-id="{{ product.pk }}">{% translate "Buy now" %}</button>
-            <button class="button button-cart" type="button" title="{% translate 'Add to cart' %}"
-                    data-add-to-cart data-id="{{ product.pk }}" data-name="{{ product.name }}" data-price="{{ product.price }}">
-                <span class="icon-cart"></span>
-            </button>
-        </div>
     </div>
 </div>

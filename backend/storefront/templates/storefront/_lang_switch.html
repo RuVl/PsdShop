@@ -1,6 +1,5 @@
 {% load i18n storefront %}
-{# Language switcher: a flag linking to the current page under the other language. Inline SVG so it
-   renders on every OS (regional-indicator flag emoji are blank on Windows). #}
+{# A flag linking to the current page in the other language. Inline SVG: flag emoji are blank on Windows. #}
 {% get_current_language as current_lang %}
 {% get_available_languages as languages %}
 {% for code, name in languages %}{% if code != current_lang %}

@@ -30,5 +30,11 @@ app_name = "storefront"
 
 urlpatterns = [
     path("", views.catalog, name="home"),
+    # SPA-only pages: Django serves the shell on them so the URLs answer 200 for everyone;
+    # the parameters are consumed by the SPA router. Slugs are reserved in backend/urlspace.py.
+    path("cart/", views.spa, name="cart"),
+    path("purchases/", views.spa, name="purchases"),
+    path("purchases/<uuid:token>/", views.spa, name="purchases-token"),
+    path("unsubscribe/<str:token>/", views.spa, name="unsubscribe"),
     path("<country:country>/<slug:doctype>/", views.catalog, name="catalog"),
 ]
