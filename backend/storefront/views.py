@@ -11,6 +11,7 @@ from django.core.paginator import Paginator
 from django.shortcuts import get_object_or_404, redirect, render
 from django.template import TemplateDoesNotExist
 from django.template.loader import get_template
+from django.urls import reverse
 
 from catalog.models import Country, DocumentType, Product
 from catalog.views import PAGE_SIZE
@@ -72,6 +73,36 @@ def catalog(request, country=None, doctype=None):
         "selected_type": selected_type,
     }
     return render(request, "storefront/catalog.html", context)
+
+
+def product(request, country=None, doctype=None, product_slug=""):
+    """One product. The id in `<id>-<slug>` resolves it; every other segment is decoration."""
+
+    pk = int(product_slug.split("-", 1)[0])
+    item = get_object_or_404(Product.objects.active().for_listing(), pk=pk)
+
+    # One canonical address per product: a stale slug or a wrong facet 301s to the current one.
+    expected = reverse(
+        "storefront:product",
+        kwargs={"country": item.country.slug, "doctype": item.document_type.slug, "product_slug": item.url_slug},
+    )
+    if request.path != expected:
+        return redirect(expected, permanent=True)
+
+    meta = seo.product_meta(request, item)
+
+    if not is_bot(request) and _shell_available():
+        return render_shell(request, meta)
+
+    context = {
+        "storefront_meta": seo.render_meta(meta),
+        "product": item,
+        "countries": Country.objects.non_empty(),
+        "popular_countries": Country.objects.non_empty().filter(is_popular=True),
+        "selected_country": item.country,
+        "selected_type": item.document_type,
+    }
+    return render(request, "storefront/product.html", context)
 
 
 def spa(request, **kwargs):

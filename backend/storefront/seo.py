@@ -11,8 +11,9 @@ import json
 from django.conf import settings
 from django.http import HttpRequest
 from django.template.loader import render_to_string
-from django.urls import translate_url
+from django.urls import reverse, translate_url
 from django.utils.safestring import mark_safe
+from django.utils.text import Truncator
 from django.utils.translation import gettext as _
 
 from backend.sites import absolute_url
@@ -73,6 +74,67 @@ def catalog_meta(request: HttpRequest, country=None, doctype=None) -> dict:
     title = title or f"{' — '.join(obj.name for obj in selected)} | {site_name()}"
     description = next((obj.meta_description for obj in selected if obj.meta_description), "")
     return build_meta(request, title=title, description=description)
+
+
+def product_meta(request: HttpRequest, product) -> dict:
+    """Meta for a product page, ld+json Product/Offer and BreadcrumbList included."""
+
+    title = product.meta_title or f"{product.name} | {site_name()}"
+    description = product.meta_description or Truncator(product.description).words(30) or ""
+
+    images = [absolute_url(image.page.url, request) for image in product.images.all() if image.page]
+    canonical_path = request.path
+    ld = {
+        "@context": "https://schema.org",
+        "@graph": [
+            {
+                "@type": "Product",
+                "name": product.name,
+                "description": description,
+                "image": images,
+                "offers": {
+                    "@type": "Offer",
+                    "price": str(product.price),
+                    "priceCurrency": "USD",
+                    "availability": "https://schema.org/InStock",
+                    "url": absolute_url(canonical_path, request),
+                },
+            },
+            {
+                "@type": "BreadcrumbList",
+                "itemListElement": [
+                    {
+                        "@type": "ListItem",
+                        "position": 1,
+                        "name": site_name(),
+                        "item": absolute_url(reverse("storefront:home"), request),
+                    },
+                    {
+                        "@type": "ListItem",
+                        "position": 2,
+                        "name": f"{product.country.name} — {product.document_type.name}",
+                        "item": absolute_url(
+                            reverse(
+                                "storefront:catalog",
+                                kwargs={"country": product.country.slug, "doctype": product.document_type.slug},
+                            ),
+                            request,
+                        ),
+                    },
+                    {"@type": "ListItem", "position": 3, "name": product.name},
+                ],
+            },
+        ],
+    }
+
+    return build_meta(
+        request,
+        title=title,
+        description=description,
+        og_type="product",
+        og_image=images[0] if images else None,
+        ld=ld,
+    )
 
 
 def service_meta(request: HttpRequest) -> dict:

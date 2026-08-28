@@ -148,7 +148,8 @@ class DynamicRenderingTests(TempUploadsMixin, TestCase):
 
     def test_person_without_build_falls_back_to_rendered_page(self):
         # No shell.html on disk (no `make spa` yet): the site must degrade, not 500.
-        response = self.client.get("/en/", HTTP_USER_AGENT="Mozilla/5.0 (X11; Linux x86_64)")
+        with patch("storefront.views.SHELL_TEMPLATE", "storefront/missing-shell.html"):
+            response = self.client.get("/en/", HTTP_USER_AGENT="Mozilla/5.0 (X11; Linux x86_64)")
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "products-list")
 
@@ -164,3 +165,54 @@ class DynamicRenderingTests(TempUploadsMixin, TestCase):
         with shell_on_disk():
             response = self.client.get("/en/germany/all/?page=2&utm_source=x", HTTP_USER_AGENT=BOT_UA)
         self.assertContains(response, 'rel="canonical" href="http://example.com/en/germany/all/?page=2"')
+
+
+class ProductPageTests(TempUploadsMixin, TestCase):
+    """The product page: canonical address, both presentations, ld+json."""
+
+    def setUp(self):
+        super().setUp()
+        country = Country.objects.create(slug="germany", code="de", name_en="Germany", name_ru="Германия")
+        doctype = DocumentType.objects.create(slug="utility-bill", name_en="Utility bill", name_ru="Счёт")
+        self.product = Product.objects.create(
+            country=country,
+            document_type=doctype,
+            year=2022,
+            price=Decimal("25.00"),
+            slug="vattenfall-2022",
+            name_en="Vattenfall 2022",
+            name_ru="Vattenfall 2022",
+            is_active=True,
+            file=ContentFile(b"x", name="one.psd"),
+        )
+        self.url = f"/en/germany/utility-bill/{self.product.pk}-vattenfall-2022/"
+
+    def test_bot_gets_rendered_product_page(self):
+        response = self.client.get(self.url, HTTP_USER_AGENT=BOT_UA)
+        self.assertContains(response, "Vattenfall 2022")
+        self.assertContains(response, "application/ld+json")
+        self.assertContains(response, '"@type": "Product"')
+        self.assertContains(response, '"priceCurrency": "USD"')
+
+    def test_person_gets_shell_with_product_meta(self):
+        with shell_on_disk():
+            response = self.client.get(self.url, HTTP_USER_AGENT="Mozilla/5.0 (X11; Linux x86_64)")
+        self.assertContains(response, '<div id="app">')
+        self.assertContains(response, 'og:type" content="product"')
+        self.assertContains(response, "Vattenfall 2022")
+
+    def test_stale_slug_redirects_to_canonical(self):
+        response = self.client.get(f"/en/germany/utility-bill/{self.product.pk}-old-name/", HTTP_USER_AGENT=BOT_UA)
+        self.assertRedirects(response, self.url, status_code=301, fetch_redirect_response=False)
+
+    def test_wrong_facet_redirects_to_canonical(self):
+        Country.objects.create(slug="france", code="fr", name_en="France", name_ru="Франция")
+        url = f"/en/france/utility-bill/{self.product.pk}-vattenfall-2022/"
+        response = self.client.get(url, HTTP_USER_AGENT=BOT_UA)
+        self.assertRedirects(response, self.url, status_code=301, fetch_redirect_response=False)
+
+    def test_unknown_or_inactive_product_is_404(self):
+        self.assertEqual(self.client.get("/en/germany/utility-bill/999999-x/", HTTP_USER_AGENT=BOT_UA).status_code, 404)
+        self.product.is_active = False
+        self.product.save(update_fields=["is_active"])
+        self.assertEqual(self.client.get(self.url, HTTP_USER_AGENT=BOT_UA).status_code, 404)

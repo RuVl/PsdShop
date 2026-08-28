@@ -24,7 +24,14 @@ class CountrySegmentConverter(SlugConverter):
     regex = rf"(?!(?:{_blocked})/)[-a-zA-Z0-9_]+"
 
 
+class ProductSlugConverter(SlugConverter):
+    """`<id>-<slug>`: the leading id resolves the product, the slug is decoration."""
+
+    regex = r"\d+[-a-zA-Z0-9_]*"
+
+
 register_converter(CountrySegmentConverter, "country")
+register_converter(ProductSlugConverter, "productslug")
 
 app_name = "storefront"
 
@@ -37,4 +44,5 @@ urlpatterns = [
     path("purchases/<uuid:token>/", views.spa, name="purchases-token"),
     path("unsubscribe/<str:token>/", views.spa, name="unsubscribe"),
     path("<country:country>/<slug:doctype>/", views.catalog, name="catalog"),
+    path("<country:country>/<slug:doctype>/<productslug:product_slug>/", views.product, name="product"),
 ]

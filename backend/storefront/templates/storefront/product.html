@@ -1,0 +1,84 @@
+{% extends "storefront/base.html" %}
+{% load i18n %}
+
+{% block content %}
+{% with type_slug=selected_type.slug %}
+
+<main class="main-content">
+    <div class="breadcrumbs">
+        <div class="container">
+            <ul class="list-reset" itemscope itemtype="https://schema.org/BreadcrumbList">
+                <li itemprop="itemListElement" itemscope itemtype="https://schema.org/ListItem">
+                    <a itemprop="item" href="{% url 'storefront:home' %}"><span itemprop="name">{% translate "Home" %}</span></a>
+                    <meta itemprop="position" content="1">
+                </li>
+                <li itemprop="itemListElement" itemscope itemtype="https://schema.org/ListItem">
+                    <a itemprop="item" href="{% url 'storefront:catalog' country=selected_country.slug doctype=type_slug %}">
+                        <span itemprop="name">{{ selected_country.name }} — {{ selected_type.name }}</span>
+                    </a>
+                    <meta itemprop="position" content="2">
+                </li>
+                <li><span>{{ product.name }}</span></li>
+            </ul>
+        </div>
+    </div>
+
+    <section class="shop mb-100">
+        <div class="container">
+            <div class="shop__body">
+                {% include "storefront/_sidebar.html" %}
+
+                <div class="shop__right-block">
+                    <div class="text black">{% translate "Product card" %}</div>
+                    <div class="product-item section">
+                        <div class="product-item__gallery">
+                            {% with images=product.images.all %}
+                            {% if images %}
+                            <div class="product-width-image">
+                                <a href="{% if images.0.page %}{{ images.0.page.url }}{% else %}{{ images.0.card.url }}{% endif %}" class="product-width-image-link">
+                                    <img src="{{ images.0.card.url }}" alt="{{ product.name }}">
+                                </a>
+                            </div>
+                            {% if images|length > 1 %}
+                            <div class="product-width-images-list">
+                                {% for image in images|slice:"1:" %}
+                                <a class="product-width-images-item" href="{% if image.page %}{{ image.page.url }}{% else %}{{ image.card.url }}{% endif %}">
+                                    <img src="{{ image.card.url }}" alt="{{ product.name }}">
+                                </a>
+                                {% endfor %}
+                            </div>
+                            {% endif %}
+                            {% endif %}
+                            {% endwith %}
+                        </div>
+                        <div class="product-item__descr">
+                            <div class="product-item__header">
+                                <div class="product-item__header-props">
+                                    <div class="badge text-small primary">{{ selected_type.name }}</div>
+                                    {% if product.year %}<div class="badge-year text-small">{{ product.year }}</div>{% endif %}
+                                </div>
+                                <span class="product-item__lang">{{ selected_country.flag }}</span>
+                            </div>
+                            <h1 class="title-section black">{{ product.name }}</h1>
+                            {% if product.description %}
+                            <div class="idesc product-item__text">
+                                <p>{{ product.description }}</p>
+                            </div>
+                            {% endif %}
+
+                            <div class="product-item__info">
+                                <div class="product-item__price">
+                                    <div class="text-mid black">{% translate "Price" %}</div>
+                                    <div class="text-mid black">$<span class="primary">{{ product.price }}</span></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+</main>
+
+{% endwith %}
+{% endblock %}
