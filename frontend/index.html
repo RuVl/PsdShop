@@ -4,9 +4,12 @@
     <meta charset="UTF-8">
     <link href="%BASE_URL%favicon.ico" rel="icon">
     <meta content="width=device-width, initial-scale=1.0" name="viewport">
-    <title>Document Shop</title>
+    <!-- The design stylesheet is served by Django/nginx from the backend static tree - the same
+         file the bot pages use. The vite dev server proxies /static to the backend. -->
+    <link href="/static/storefront/css/style.css" rel="stylesheet">
+    <title>PSD Shop</title>
 </head>
-<body>
+<body id="body">
 <div id="app"></div>
 <script src="/src/main.js" type="module"></script>
 </body>

@@ -2,20 +2,18 @@
 import {ref} from "vue";
 import {storeToRefs} from "pinia";
 import {useCartStore} from "@/stores/cart.js";
-import {useCurrenciesStore} from "@/stores/currencies.js";
-import CountryFlag from 'vue-country-flag-next';
 import ViewBlock from "@/components/ViewBlock.vue";
 import ListView from "@/components/ListView.vue";
 import TrashIcon from "@/components/icons/IconTrash.vue";
 import CommonButton from "@/components/CommonButton.vue";
-import QuantityChanger from "@/components/CounterChanger.vue";
 import SelectPayment from "@/components/SelectPayment.vue";
+import {useLocalized} from "@/composables/localized.js";
 
+// A cart line is a catalog API payload: no quantities (a template is one order line, ADR-0001),
+// prices in USD only. The checkout flow itself is reworked in M3.
 const cartStore = useCartStore();
 const {cartItems, cartItemCount, totalPrice} = storeToRefs(cartStore);
-
-const currencyStore = useCurrenciesStore();
-const {currentCurrency} = storeToRefs(currencyStore);
+const localized = useLocalized();
 
 const is_opened = ref(false);
 </script>
@@ -27,18 +25,17 @@ const is_opened = ref(false);
       {{ $t('cart_view.empty') }}
     </div>
     <div v-else>
-      <ListView v-slot="{element: item, index: i}" :elements="cartItems" class="cart-item">
+      <ListView v-slot="{element: item}" :elements="cartItems" class="cart-item">
         <div class="item-head">
-          <CountryFlag :country="item.code" class="flag-icon"/>
-          <span class="product-name">{{ item.name }}</span>
+          <img v-if="item.preview?.card" :src="item.preview.card" :alt="localized(item)" class="item-preview">
+          <span class="product-name">{{ localized(item) }}</span>
         </div>
-        <QuantityChanger v-model:item="cartItems[i]" counter_name="quantity"/>
         <div class="cost-block">
           <span class="cost-label short">{{ $t('cart_view.cost') }}:</span>
           <span class="cost-label full">{{ $t('cart_view.cost_full') }}:</span>
-          <span class="product-cost">{{ item.formattedPrice() }}</span>
+          <span class="product-cost">${{ Number(item.price).toFixed(2) }}</span>
         </div>
-        <button class="remove-btn" @click="cartStore.removeItem(item)">
+        <button class="remove-btn" @click="cartStore.removeItem(item.id)">
           <span class="remove-label">{{ $t('buttons.delete') }}</span>
           <TrashIcon/>
         </button>
@@ -47,7 +44,7 @@ const is_opened = ref(false);
       <div class="total-price-block">
         <div>
           <span>{{ $t('cart_view.total') }}:</span>
-          <span class="total-price">{{ totalPrice.toFixed(2) }} {{ currentCurrency.sign }}</span>
+          <span class="total-price">${{ totalPrice.toFixed(2) }}</span>
         </div>
         <CommonButton tabindex="0" @click="is_opened=true">
           {{ $t('buttons.payment_method') }}
@@ -71,17 +68,10 @@ const is_opened = ref(false);
   }
 
   .cart-item {
-    .flag-icon {
-      $height: 39px;
-      $width: 52px;
-
-      border-radius: 100%;
-      width: $height;
-      min-width: $height;
-      background-position-x: calc(($height - $width) / 2);
-      background-repeat: no-repeat;
-
-      margin-bottom: 0;
+    .item-preview {
+      width: 52px;
+      border-radius: 6px;
+      object-fit: cover;
     }
 
     // flag + name stay grouped on one line; on desktop the group fills the free space

@@ -125,6 +125,49 @@
       "second": "passing verification"
     }
   },
+  "storefront": {
+    "hero": {
+      "title": "Online store of PDF files",
+      "text": "Editable proof-of-address documents, utility bills and bank statements in PDF. Delivered by a download link right after payment."
+    },
+    "nav": {
+      "home": "Home",
+      "rules": "Rules",
+      "contacts": "Contacts"
+    },
+    "footer": {
+      "links": "Links"
+    },
+    "search": {
+      "products": "Search products",
+      "products_placeholder": "Enter a product name",
+      "country_placeholder": "Search by country"
+    },
+    "sidebar": {
+      "title": "Store categories",
+      "popular": "Popular",
+      "all": "All categories",
+      "all_countries": "All countries"
+    },
+    "filter": {
+      "title": "Filter products",
+      "all_categories": "All categories"
+    },
+    "grid": {
+      "title": "Product list",
+      "all_products": "All products",
+      "empty": "Nothing found for this selection.",
+      "not_found": "@:other.page_not_found",
+      "load_more": "Show more"
+    },
+    "card": {
+      "price": "Price",
+      "in_cart": "Already in the cart"
+    },
+    "product": {
+      "title": "Product card"
+    }
+  },
   "unsubscribe": {
     "already": "{email} is already unsubscribed from the mailing list.",
     "confirm": "Unsubscribe {email} from the mailing list? E-mails about your purchases will keep coming.",

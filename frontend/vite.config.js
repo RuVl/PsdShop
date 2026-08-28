@@ -40,7 +40,9 @@ export default defineConfig(({mode}) => {
         },
         base: '/static/storefront/spa/',
         plugins: [
-            vue(),
+            // Design images are absolute /static/... URLs served by the backend - leave them
+            // alone instead of trying to bundle them.
+            vue({template: {transformAssetUrls: false}}),
             djangoShell(),
         ],
         resolve: {
@@ -51,6 +53,14 @@ export default defineConfig(({mode}) => {
         build: {
             outDir: OUT_DIR,
             emptyOutDir: true,
+        },
+        server: {
+            // The SPA references the same /static and /media the backend serves (design CSS,
+            // images, previews) - in dev those come from the host Django on :8000.
+            proxy: {
+                '/static': env.VITE_BACKEND_URL || 'http://localhost:8000',
+                '/media': env.VITE_BACKEND_URL || 'http://localhost:8000',
+            },
         },
     }
 })
