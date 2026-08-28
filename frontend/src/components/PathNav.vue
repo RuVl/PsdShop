@@ -4,9 +4,13 @@ import {useRouter} from "vue-router";
 const router = useRouter();
 const route_chain = [];
 
-for (let route = router.currentRoute.value; ; route = router.resolve({name: route.meta['parent']})) {
+// Walk meta.parent up to the root. Params (the /:lang prefix) ride along, and a route without
+// meta.name simply draws no breadcrumb instead of feeding $t an undefined key.
+for (let route = router.currentRoute.value; route?.meta?.name;) {
   route_chain.unshift(route);
-  if (!router.hasRoute(route.meta['parent'])) break;
+  const parent = route.meta.parent;
+  if (!parent || !router.hasRoute(parent)) break;
+  route = router.resolve({name: parent, params: router.currentRoute.value.params});
 }
 </script>
 

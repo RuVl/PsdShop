@@ -1,6 +1,5 @@
 <script setup>
 import {reactive, ref} from "vue";
-import Product from "@/models/Product.js";
 import {useOrderStore} from "@/stores/order.js";
 import {errorMessageKey} from "@/api/errors.js";
 import ModalWindow from "@/components/ModalWindow.vue";
@@ -15,8 +14,9 @@ const payment_form = reactive({
   method: 0
 })
 
+// A catalog API payload for the express "buy now" path; without it the whole cart is bought.
 const props = defineProps({
-  product: Product
+  product: {type: Object, default: null}
 });
 
 const orderStore = useOrderStore();

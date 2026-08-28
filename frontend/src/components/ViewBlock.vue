@@ -15,6 +15,12 @@ import PathNav from "@/components/PathNav.vue";
 
 <style lang="scss" scoped>
 .view-block {
+  /* The Verdoc-era pages centered themselves via #app; that lives here now. */
+  width: 100%;
+  max-width: 1200px;
+  margin-left: auto;
+  margin-right: auto;
+
   & > .title {
     margin: 20px 0;
   }

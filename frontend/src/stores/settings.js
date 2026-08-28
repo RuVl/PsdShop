@@ -9,16 +9,12 @@ function getUserLocale() {
 export const useSettingsStore = defineStore('settings', {
     state: () => ({
         currentLanguage: getUserLocale(),
-        currentCurrency: 'USD'
     }),
     actions: {
         async setLanguage(language) {
             this.currentLanguage = language;
             await setI18nLanguage(language);
         },
-        setCurrency(currency) {
-            this.currentCurrency = currency;
-        }
     },
     persist: true
 });
