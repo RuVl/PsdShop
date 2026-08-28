@@ -3,12 +3,22 @@ import {computed, ref} from 'vue';
 import {useRoute} from 'vue-router';
 import LangSwitch from '@/components/storefront/LangSwitch.vue';
 import FloatingCart from '@/components/storefront/FloatingCart.vue';
+import HeroHeader from '@/components/storefront/HeroHeader.vue';
+import {useContentStore} from '@/stores/content.js';
+import {useLocalized} from '@/composables/localized.js';
 
 // The design's shell: header with menu and language flag, the page, footer, floating cart.
 // Markup and classes follow design/index.html (the storefront style.css is linked globally).
+// The menu pages and the footer texts come from the content API - same rows the bot pages render.
 const route = useRoute();
+const contentStore = useContentStore();
+const localized = useLocalized();
+contentStore.load();
+
 const lang = computed(() => route.params.lang || 'en');
 const home = computed(() => ({name: 'home', params: {lang: lang.value}}));
+// The hero lives on the listing pages; everywhere else the dark strip stays bare.
+const showHero = computed(() => ['home', 'catalog'].includes(route.name));
 
 const menuOpen = ref(false);
 
@@ -35,8 +45,10 @@ function closeMenu() {
             <li class="menu__item white link-primary" @click="closeMenu">
               <router-link :to="home">{{ $t('storefront.nav.home') }}</router-link>
             </li>
-            <li class="menu__item white link-primary" @click="closeMenu"><a href="#">{{ $t('storefront.nav.rules') }}</a></li>
-            <li class="menu__item white link-primary" @click="closeMenu"><a href="#">{{ $t('storefront.nav.contacts') }}</a></li>
+            <li v-for="navPage in contentStore.pages" :key="navPage.slug" class="menu__item white link-primary"
+                @click="closeMenu">
+              <router-link :to="{name: 'page', params: {lang, pageSlug: navPage.slug}}">{{ localized(navPage, 'title') }}</router-link>
+            </li>
           </ul>
           <LangSwitch/>
         </div>
@@ -50,6 +62,8 @@ function closeMenu() {
     </div>
   </header>
 
+  <HeroHeader :show-hero="showHero"/>
+
   <router-view/>
 
   <footer class="footer" id="footer">
@@ -59,6 +73,9 @@ function closeMenu() {
           <router-link :to="home" class="logo opacity">
             <picture class="logo__img"><img src="/static/storefront/img/icons/logo-footer.png" alt="Logo icon"></picture>
           </router-link>
+          <p v-if="contentStore.settings && localized(contentStore.settings, 'footer_note')" class="text-small black">
+            {{ localized(contentStore.settings, 'footer_note') }}
+          </p>
         </div>
         <div class="footer__block">
           <div class="footer__title title black upper">{{ $t('storefront.footer.links') }}</div>
@@ -67,12 +84,16 @@ function closeMenu() {
               <li class="footer__item text black link-primary">
                 <router-link :to="home">{{ $t('storefront.nav.home') }}</router-link>
               </li>
-              <li class="footer__item text black link-primary"><a href="#">{{ $t('storefront.nav.contacts') }}</a></li>
-              <li class="footer__item text black link-primary"><a href="#">{{ $t('storefront.nav.rules') }}</a></li>
+              <li v-for="navPage in contentStore.pages" :key="navPage.slug" class="footer__item text black link-primary">
+                <router-link :to="{name: 'page', params: {lang, pageSlug: navPage.slug}}">{{ localized(navPage, 'title') }}</router-link>
+              </li>
             </ul>
           </div>
         </div>
-        <div class="footer__block"></div>
+        <div class="footer__block">
+          <a v-if="contentStore.settings?.support_url" class="btn btn-grade btn-big text white opacity"
+             :href="contentStore.settings.support_url" target="_blank" rel="noopener">{{ $t('buttons.support') }}</a>
+        </div>
       </div>
     </div>
   </footer>

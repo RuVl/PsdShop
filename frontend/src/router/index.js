@@ -13,39 +13,51 @@ const routes = [
                 name: 'home',
                 path: '',
                 component: () => import("@/views/Catalog.vue"),
+                meta: {name: 'routes.main'},
             },
             {
                 name: 'cart',
-                path: 'cart',
+                path: 'cart/',
                 component: () => import("@/views/Cart.vue"),
+                meta: {parent: 'home', name: 'routes.cart'},
             },
             {
                 name: 'purchases',
-                path: 'purchases',
+                path: 'purchases/',
                 component: () => import("@/views/MyPurchases.vue"),
+                meta: {parent: 'home', name: 'routes.my_purchases'},
             },
             {
                 // The token is the whole authentication - it arrives by e-mail and expires, see ADR-0002.
                 name: 'purchases-list',
-                path: 'purchases/:token',
+                path: 'purchases/:token/',
                 component: () => import("@/views/Purchases.vue"),
+                meta: {parent: 'home', name: 'routes.my_purchases'},
             },
             {
                 // Reached from an e-mail footer; the token is signed, so the page needs nothing else.
                 name: 'unsubscribe',
-                path: 'unsubscribe/:token',
+                path: 'unsubscribe/:token/',
                 component: () => import("@/views/Unsubscribe.vue"),
+                meta: {parent: 'home', name: 'routes.unsubscribe'},
             },
             {
                 // `<id>-<slug>`: the id resolves the product, the slug is decoration.
                 name: 'product',
-                path: ':country/:type/:productSlug(\\d+[-a-zA-Z0-9_]*)',
+                path: ':country/:type/:productSlug(\\d+[-a-zA-Z0-9_]*)/',
                 component: () => import("@/views/Product.vue"),
+            },
+            {
+                // A single segment is an owner-written page (content.Page); reserved roots are
+                // blocked on the model, mirroring storefront/urls.py.
+                name: 'page',
+                path: ':pageSlug([a-z0-9][-a-z0-9_]*)/',
+                component: () => import("@/views/Page.vue"),
             },
             {
                 // `all` means "any" on either segment; the canonical form of all/all is the home page.
                 name: 'catalog',
-                path: ':country/:type',
+                path: ':country/:type/',
                 component: () => import("@/views/Catalog.vue"),
             },
         ],

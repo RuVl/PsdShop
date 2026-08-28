@@ -36,8 +36,9 @@ export default defineConfig(({mode}) => {
 
     return {
         define: {
-            // Same-origin /api in production (one domain); dev overrides via .env.development.
-            __API_URL__: JSON.stringify(env.VITE_API_URL || process.env.VITE_API_URL || '/api')
+            // One domain, so the built SPA always talks to the same-origin /api - a build must
+            // never bake in a host. The dev server takes VITE_API_URL (.env.development).
+            __API_URL__: JSON.stringify(mode === 'development' ? (env.VITE_API_URL || 'http://localhost:8000/api') : '/api')
         },
         base: '/static/storefront/spa/',
         plugins: [

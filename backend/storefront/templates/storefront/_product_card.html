@@ -6,8 +6,6 @@
                 {% if product.preview.card_webp %}<source srcset="{{ product.preview.card_webp.url }}" type="image/webp">{% endif %}
                 <img src="{{ product.preview.card.url }}" alt="{{ product.name }}">
             </picture>
-        {% else %}
-            <img src="{% static 'storefront/img/products/product.png' %}" alt="{{ product.name }}">
         {% endif %}
     </a>
     <div class="product-item-content">

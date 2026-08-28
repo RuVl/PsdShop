@@ -1,9 +1,7 @@
 {% extends "storefront/base.html" %}
 {% load static i18n %}
 
-{% block content %}
-{% with country_slug=selected_country.slug|default:"all" type_slug=selected_type.slug|default:"all" %}
-
+{% block hero %}
 <div class="bgs-header">
     <section class="home" id="home">
         <div class="container">
@@ -16,9 +14,34 @@
             </div>
         </div>
     </section>
+    {% include "storefront/_bgs_decor.html" %}
 </div>
+{% endblock %}
+
+{% block content %}
+{% with country_slug=selected_country.slug|default:"all" type_slug=selected_type.slug|default:"all" %}
 
 <main class="main-content">
+    {% if slides %}
+    {# The welcome slider: the SPA rotates these; a bot reads them stacked - same content. #}
+    <section class="welcome" id="welcome">
+        <div class="container">
+            {% for slide in slides %}
+            <div class="content">
+                <div class="content__block">
+                    <div class="content__title title white">{{ slide.title }}</div>
+                    {% if slide.text %}<div class="idesc content__text text white"><p>{{ slide.text }}</p></div>{% endif %}
+                    {% if slide.button_label and slide.button_url %}
+                    <a class="btn btn-grade text white opacity" href="{{ slide.button_url }}">{{ slide.button_label }}</a>
+                    {% endif %}
+                </div>
+                {% if slide.image %}<picture class="content__img"><img src="{{ slide.image.url }}" alt=""></picture>{% endif %}
+            </div>
+            {% endfor %}
+        </div>
+    </section>
+    {% endif %}
+
     <section class="shop mb-60">
         <div class="container">
             <div class="shop__body">
@@ -73,10 +96,11 @@
         </div>
     </section>
 
-    {% if selected_country.seo_text or selected_type.seo_text %}
+    {% if selected_country.seo_text or selected_type.seo_text or home_page.body %}
     <section class="seo mb-60" id="seo">
         <div class="container">
             <div class="idesc">
+                {% if home_page.body %}{{ home_page.body|safe }}{% endif %}
                 {% if selected_country.seo_text %}<p>{{ selected_country.seo_text }}</p>{% endif %}
                 {% if selected_type.seo_text %}<p>{{ selected_type.seo_text }}</p>{% endif %}
             </div>

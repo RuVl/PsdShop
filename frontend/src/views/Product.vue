@@ -153,6 +153,11 @@ function buyNow() {
 </template>
 
 <style scoped>
+/* The design drew this icon via a background PNG; the SVG inherits color instead. */
+.button-cart {
+  color: #2136ff;
+}
+
 .button-cart:disabled {
   opacity: .5;
   cursor: default;

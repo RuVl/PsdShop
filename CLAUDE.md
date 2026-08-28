@@ -18,18 +18,18 @@ payment, delivery, broadcasts and admin statistics are reused; the catalog, the 
 the currency and the whole design are being replaced. The roadmap, target schema and open
 questions live in [`docs/plan.md`](./docs/plan.md) - **read it before changing models**.
 
-What is decided but **not yet in the code** (each stage is R1..R7 in the plan):
+Already **in** the code (stages M1 and M2 of the plan):
 
-| Decision | ADR | Stage |
-|---|---|---|
-| A product is a template sold any number of times - no `StockItem`, no `Allocation`, no reservation | [0001](./docs/adr/0001-unlimited-copies-no-reservation.md) | R2 |
-| Catalog is country x document type x year, with a gallery and a product page | [0008](./docs/adr/0008-catalog-country-type-year.md) | R1 |
-| Prices are USD only - `djmoney` and exchange rates go away | [0006](./docs/adr/0006-single-currency-usd.md) | R3 |
+| Decision | ADR |
+|---|---|
+| A product is a template sold any number of times - no `StockItem`, no `Allocation`, no reservation | [0001](./docs/adr/0001-unlimited-copies-no-reservation.md) |
+| Catalog is country x document type x year, with a gallery and a product page | [0008](./docs/adr/0008-catalog-country-type-year.md) |
+| Prices are USD only - `djmoney` and exchange rates are gone | [0006](./docs/adr/0006-single-currency-usd.md) |
+| Dynamic rendering: every storefront URL answers twice from one view - search bots get the full Django-rendered page, people get the SPA shell (the vite-built `index.html` with this page's meta injected) and the Vue SPA takes over. ADR-0007 and ADR-0009 are superseded by it. | [0010](./docs/adr/0010-dynamic-rendering.md) |
 
-Already **in** the code: dynamic rendering ([ADR-0010](./docs/adr/0010-dynamic-rendering.md)) -
-every storefront URL answers two ways from one view: search bots get the full Django-rendered
-page, people get the SPA shell (the vite-built `index.html` with this page's meta injected), and
-the Vue SPA takes over from there. ADR-0007 and ADR-0009 are superseded by it.
+**Still to do: M3 (checkout, purchases page, delivery e-mails on the new schema), M4 (sitemap.xml,
+robots.txt) and M5 (final cleanup).** The order/callback/delivery code below is still Verdoc-era
+where it touches the checkout.
 
 Everything below describes the code **as it is now** unless a line says otherwise.
 
@@ -70,8 +70,6 @@ make dev-manage c="seed_testdata --flush" # on the host against the dev db (auto
 make migrate       # make manage c=showmigrations to inspect first
 make makemigrations m="catalog customer mailing sales"
 make superuser
-make update-rates  # fetch currency rates (djmoney) - goes away in R3
-make expire        # release allocations of expired PENDING orders - goes away in R2
 make broadcast     # send QUEUED broadcasts (also cron, every 15 min); c="--id N --dry-run --test"
 make prune-callbacks c="--dry-run"  # drop raw Plisio callbacks past the retention window (also cron, weekly)
 
@@ -84,10 +82,12 @@ make dev-messages / make dev-compilemessages  # on the host
 # Tests
 make test          # in the container; make dev-test on the host (t="sales" or t="sales.tests.DeliverTests")
 
-# Seed test catalog for manual UI testing (catalog `seed_testdata` command):
+# Seed test data for manual UI testing (catalog `seed_testdata` command):
 #   make dev-manage c="seed_testdata --flush"   (host/dev)   or   make manage c="seed_testdata --flush" (container)
-# Currently seeds the Verdoc-era catalog (countries x products x stock items) - rewritten in R1
-# to cover countries x document types x years. --flush wipes the catalog first.
+# Countries x document types x years with generated preview images, plus the layout edge cases
+# (very long name, extreme prices, no year, hidden) and the content rows the storefront chrome
+# needs: pages (home/info/contacts), welcome slides and the settings singleton. --flush wipes
+# the catalog and the content pages/slides first.
 
 # DB
 make db-dump [DUMP=backups/dump.sql] / make db-restore DUMP=… / make psql
@@ -104,9 +104,11 @@ Lint/format is **`uvx ruff@0.15.12`**; ruff config lives in `backend/pyproject.t
 **line-length 120**, `target-version = "py313"`, rule set `E, F, I, UP, B, W, C4, SIM`. pre-commit
 lives at the **repo root** (`.pre-commit-config.yaml`, run via `uvx pre-commit`): ruff-check
 `--fix` + ruff-format; mypy is commented out. Tests live in `catalog/tests.py`,
-`content/tests.py`, `customer/tests.py`, `mailing/tests.py`, `sales/tests.py` and
-`sales/tests_statistics.py` (django `TestCase`, run with `make test` / `make dev-test`) and cover
-the checkout/callback/delivery invariants - keep them green. `sales/tests_statistics.py` is
+`content/tests.py`, `customer/tests.py`, `mailing/tests.py`, `sales/tests.py`,
+`sales/tests_statistics.py` and `storefront/tests.py` (django `TestCase`, run with `make test` /
+`make dev-test`) and cover the checkout/callback/delivery invariants plus the UA split - keep
+them green. **The test targets name the apps explicitly**, so a new app must be added to both
+`test` and `dev-test` in the Makefile or its tests silently never run. `sales/tests_statistics.py` is
 deliberately separate: it holds the arithmetic behind the dashboard, not the fulfillment
 invariants. Target runtime is **Python 3.13**.
 
@@ -125,8 +127,7 @@ invariants. Target runtime is **Python 3.13**.
   `VITE_API_URL` at the host backend (`http://localhost:8000/api`). `make env` creates it; the real
   file is gitignored (the `.env.development.dist` template stays tracked).
 - Settings use `django-environ`. Key vars: `DATABASE_URL`, `EMAIL_URL`, `PLISIO_SECRET_KEY`,
-  `OPENEXCHANGERATES_APP_ID` (drops out in R3), `ALLOWED_HOSTS`, `CORS_ALLOWED_ORIGINS`,
-  `CSRF_TRUSTED_ORIGINS`.
+  `ALLOWED_HOSTS`, `CORS_ALLOWED_ORIGINS`, `CSRF_TRUSTED_ORIGINS`.
 - Frontend build injects `VITE_API_URL` as the compile-time constant `__API_URL__` (see
   `vite.config.js`); the axios client in `src/api/index.js` uses Django's CSRF cookie/header.
 - After first deploy, update the `django_site` row's domain to match your host - every absolute URL
@@ -148,15 +149,14 @@ invariants. Target runtime is **Python 3.13**.
 Backend apps: `catalog` (products), `customer` (buyers and their access), `sales` (checkout,
 payment, delivery), `mailing` (broadcasts).
 
-1. **Catalog** - today `Country` → `Product` → `StockItem`, where a unit is available exactly when
-   no non-`RELEASED` `Allocation` points at it and stock is **derived**
-   (`StockItem.objects.available()`, `Product.objects.with_available()`). **R1/R2 replace this**
-   with a flat `Product` carrying its own file plus `Country`, `DocumentType`, `year` and
-   `ProductImage` - no stock, no scarcity ([ADR-0001](./docs/adr/0001-unlimited-copies-no-reservation.md),
-   [ADR-0008](./docs/adr/0008-catalog-country-type-year.md)).
+1. **Catalog** - a flat `Product` carrying its own file plus `Country`, `DocumentType`, `year` and
+   `ProductImage`: no stock, no scarcity, nothing to reserve
+   ([ADR-0001](./docs/adr/0001-unlimited-copies-no-reservation.md),
+   [ADR-0008](./docs/adr/0008-catalog-country-type-year.md)). A product is taken off the shelf with
+   `is_active=False`, never deleted - `OrderItem.product` is `PROTECT`.
 2. **Checkout** - `POST /api/order/` (`OrderCreateView` + `OrderSerializer`). Gets/creates the
    `Customer`, computes `total_price`, creates `Order` + `OrderItem`s **with a price snapshot**
-   (`product_name`, `unit_price`), and (today) allocates units. Then requests a Plisio invoice; the
+   (`product_name`, `unit_price`). Then requests a Plisio invoice; the
    URL is stored on `Order.invoice_url`, and if the request fails the order is deleted - the
    endpoint answers **502** with `{detail, code: "invoice_failed", provider_code}`, passing Plisio's
    own message on instead of a blanket "Error creating invoice".
@@ -165,20 +165,20 @@ payment, delivery), `mailing` (broadcasts).
    **before** the atomic block, then upserts the `Transaction` **by `txn_id`** (a currency switch
    mints a new invoice for the same order). On PAID/OVERPAID: `order.mark_paid()` stamps `paid_at`
    once and only that first call sends the e-mail; `order.deliver()` hands the files over. On
-   EXPIRED/CANCELLED: `order.release()` (which stops being needed once stock is gone). A duplicate
-   callback is a 200 no-op.
+   EXPIRED/CANCELLED there is nothing to undo - nothing was ever reserved. A duplicate callback is
+   a 200 no-op.
 4. **Delivery** - two independent tokens, both with a TTL
    ([ADR-0002](./docs/adr/0002-customer-and-purchases-page.md)). `Customer.access_token`
    (`PURCHASES_PAGE_TTL` = 24h) opens the **purchases page**, and the delivery e-mail carries that
    one link and nothing else (`sales/utils.send_purchases_link`). The per-file token
-   (`DOWNLOAD_TTL` = 24h; on `Allocation` today, on `OrderItem` after R2) opens one file:
+   (`DOWNLOAD_TTL` = 24h, on `OrderItem`) opens one file:
    `GET /api/files/<uuid>/`. The page is `GET /api/purchases/<customer_token>/`, with
    `POST .../refresh/<id>/` and `POST .../refresh-all/` re-issuing file tokens. An unknown,
    malformed or expired page token all answer the **same 404** - the API must not confirm that a
    token exists. `POST /api/send-links/` is the recovery path: it tops up anything undelivered,
    **rotates** `access_token` (this is how an old page link is revoked) and mails the new one; file
    tokens are deliberately left alone so links the customer already shared keep working.
-   - `serve_allocation()` in `sales/views.py` is the single point a file is streamed from, and the
+   - `serve_order_item()` in `sales/views.py` is the single point a file is streamed from, and the
      only place a download writes to the database: it records the download **after** the file is
      open, so a refused link never counts. That is an `UPDATE` with `F()`, not a `save()`, so two
      parallel downloads add up to two. The counter answers "did the **customer** take the file", so
@@ -242,8 +242,6 @@ Everything in USD, days are **UTC** days (`TIME_ZONE = "UTC"`), and the page say
   `updated_at` that the paid callback overwrites - and the end is `paid_at`, so the two legs sum to
   the total. An order with no pending callback is left out of both legs instead of reading as
   instant; the page prints how many orders the figures cover.
-- **The stock forecast section is Verdoc-era and goes away in R3** together with the derived stock
-  count - a template never runs out.
 - **"All time" starts at the first sale** (`statistics.first_sale_at()`), not at a fixed date. An
   empty shop falls back to the default 30 days.
 - **A point on the revenue chart opens the orders paid that day**, on the ordinary changelist with
@@ -356,16 +354,25 @@ project directory here.
 ### Frontend
 
 Vue 3 + Pinia (with `pinia-plugin-persistedstate` for the cart), Vue Router, axios. Stores in
-`src/stores/` (`cart`, `catalog`, `order`, `settings`, `languages`, and `currencies` until R3).
+`src/stores/`: `cart`, `catalog` (countries and document types), `content` (menu pages, site
+settings, slides), `order`, `settings` (the language only - the currency store is gone with USD).
 
 **Dynamic rendering ([ADR-0010](./docs/adr/0010-dynamic-rendering.md)).** The SPA is the whole
 interface for people; Django serves it as a shell (`storefront/shell.html`, built by `make spa`
 from `frontend/index.html` - vite injects the `{{ storefront_meta }}` / `{{ LANGUAGE_CODE }}`
 hooks at build time and moves the file into the backend templates). Bots get the Django-rendered
 pages on the same URLs. vue-router mirrors `backend/backend/urlspace.py`; keep the two in sync
-when a route is added. The catalog data comes from `/api/catalog/...` (`src/api/catalog.js`),
-and both presentations must stay content-equivalent - a catalog change lands in the bot template
-and the Vue view together.
+when a route is added. Data comes from `/api/catalog/...` (`src/api/catalog.js`) and
+`/api/content/...` (`src/api/content.js`), and both presentations must stay content-equivalent -
+a change lands in the bot template and the Vue view together. Two pieces of markup are literally
+shared: `storefront/_bgs_decor.html` and `components/storefront/HeroHeader.vue` carry the same
+decor/wave block from the design, and the dark strip must stay on every page (the header is
+`position: fixed`, so without it the content slides underneath).
+
+**Verify in a browser before calling a storefront stage done** - green tests and `curl` do not
+catch a blank grid, a dead button or a layout that overflows at 320px. Run `make dev-backend`
+plus `make dev-frontend` (or `make spa` and the backend alone), then click through: catalog,
+filters, product page, add to cart, cart, both languages.
 
 The cart is a **set** of product payloads (no quantities - an order holds a product at most
 once); `stores/cart.js` persists it, the floating `cartlequebutton` from the design is
@@ -393,10 +400,13 @@ stays out of the interface (English-only and technical); its `provider_code` goe
 ### Design and responsive layout
 
 The design is a static build in **`design/`** (`index.html`, `product.html`, `style.css`, `app.js`,
-`img/`, `fonts/`) - it is the source of truth for the storefront's look, and R5 ports it into Vue
-components. The jQuery plugins it ships with (`remodal`, `swiper-bundle`, `glightbox`, jQuery
-itself) are **not** carried over as-is: the modal is our own component, swiper has a
-framework-agnostic element build, and the filters/burger/sorting in `app.js` become reactive state.
+`img/`, `fonts/`) - it is the source of truth for the storefront's look. Its `style.css` lives at
+`backend/storefront/static/storefront/css/` and dresses both presentations, so a Vue component
+reuses the design's class names rather than inventing its own. The jQuery plugins it ships with
+(`remodal`, `swiper-bundle`, jQuery itself) are **not** carried over: the modal is our own
+component, the welcome slider is `components/storefront/WelcomeSlider.vue` (~50 lines, the design's
+arrow styles), and the filters/burger/search in `app.js` are reactive state. `glightbox` stays, as
+an npm package, for the product gallery.
 `design/Инструкция по обновлению.txt` documents the year badge and the filter block the designer
 added last - follow it when the markup differs from an older screenshot.
 

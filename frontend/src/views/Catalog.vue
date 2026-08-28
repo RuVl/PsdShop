@@ -1,10 +1,12 @@
 <script setup>
-import {computed, ref, watch} from 'vue';
+import {computed, onBeforeUnmount, onMounted, ref, watch} from 'vue';
 import {useRoute, useRouter} from 'vue-router';
 import CountrySidebar from '@/components/storefront/CountrySidebar.vue';
 import ProductCard from '@/components/storefront/ProductCard.vue';
+import WelcomeSlider from '@/components/storefront/WelcomeSlider.vue';
 import IconSearch from '@/components/icons/IconSearch.vue';
 import {fetchProducts} from '@/api/catalog.js';
+import {fetchPage} from '@/api/content.js';
 import {useCatalogStore} from '@/stores/catalog.js';
 import {useLocalized} from '@/composables/localized.js';
 
@@ -21,8 +23,16 @@ const lang = computed(() => route.params.lang || 'en');
 const countrySlug = computed(() => route.params.country || 'all');
 const typeSlug = computed(() => route.params.type || 'all');
 
+const isHome = computed(() => countrySlug.value === 'all' && typeSlug.value === 'all');
+
 const selectedCountry = computed(() => catalogStore.countries.find(c => c.slug === countrySlug.value) || null);
 const selectedType = computed(() => catalogStore.documentTypes.find(t => t.slug === typeSlug.value) || null);
+
+// The owner-written SEO block of the front page (the `home` content.Page row).
+const homePage = ref(null);
+watch(isHome, async (home) => {
+    if (home && !homePage.value) homePage.value = await fetchPage('home').catch(() => null);
+}, {immediate: true});
 const typeNames = computed(() => Object.fromEntries(catalogStore.documentTypes.map(t => [t.slug, localized(t)])));
 
 // Grid state: loading, failed and empty must never look alike.
@@ -45,15 +55,19 @@ async function loadPage(target, append = false) {
         page.value = target;
         state.value = 'ready';
     } catch (error) {
-        if (error.response?.status === 404) notFound.value = true;
-        else state.value = 'failed';
+        if (error.response?.status !== 404) state.value = 'failed';
+        // A 404 past the last page just ends the list; on a fresh load it is a bad filter slug.
+        else if (append) count.value = products.value.length;
+        else notFound.value = true;
     } finally {
         loadingMore.value = false;
     }
 }
 
+// A string key, not an array: an array getter is a fresh object every run, so it would refire
+// on every route change - including the ?page= updates loadMore itself writes.
 watch(
-    () => [route.params.country, route.params.type],
+    () => `${route.params.country || 'all'}/${route.params.type || 'all'}`,
     () => {
         notFound.value = false;
         products.value = [];
@@ -63,11 +77,30 @@ watch(
 );
 
 function loadMore() {
+    // Guarded here too: the IntersectionObserver can fire with a stale view of the list.
+    if (loadingMore.value || state.value !== 'ready' || !hasNext.value) return;
     const next = page.value + 1;
     // The URL keeps up so a reload or a shared link lands on the same page the bot would see.
     router.replace({query: {...route.query, page: next}});
     loadPage(next, true);
 }
+
+// Infinite scroll: the "show more" button clicks itself when it scrolls into view; without an
+// observer (or with JS off entirely - the bot pages) real `?page=N` links do the same job.
+const loadMoreBlock = ref(null);
+let observer = null;
+onMounted(() => {
+    observer = new IntersectionObserver(entries => {
+        if (entries.some(entry => entry.isIntersecting) && hasNext.value && !loadingMore.value && state.value === 'ready') {
+            loadMore();
+        }
+    });
+    watch(loadMoreBlock, (element, previous) => {
+        if (previous) observer.unobserve(previous);
+        if (element) observer.observe(element);
+    }, {immediate: true});
+});
+onBeforeUnmount(() => observer?.disconnect());
 
 // The product search filters client-side, like the design's app.js did.
 const productQuery = ref('');
@@ -85,21 +118,9 @@ function catalogTarget(country, type) {
 </script>
 
 <template>
-  <div class="bgs-header">
-    <section class="home" id="home">
-      <div class="container">
-        <div class="home__body">
-          <div class="home__block">
-            <h1 class="home__title title white">{{ $t('storefront.hero.title') }}</h1>
-            <p class="home__text text white">{{ $t('storefront.hero.text') }}</p>
-          </div>
-          <picture class="home__img"><img src="/static/storefront/img/home/home-img.png" alt="Decor"></picture>
-        </div>
-      </div>
-    </section>
-  </div>
-
   <main class="main-content">
+    <WelcomeSlider v-if="isHome"/>
+
     <div v-if="notFound" class="container">
       <p class="text black">{{ $t('storefront.grid.not_found') }}</p>
     </div>
@@ -154,7 +175,7 @@ function catalogTarget(country, type) {
                                :type-name="typeNames[product.document_type] || ''"/>
                   <p v-if="!visibleProducts.length" class="text black">{{ $t('storefront.grid.empty') }}</p>
                 </div>
-                <div v-if="hasNext" class="load-more">
+                <div v-if="hasNext" ref="loadMoreBlock" class="load-more">
                   <button class="btn btn-grade text white opacity" type="button" :disabled="loadingMore"
                           @click="loadMore">
                     {{ loadingMore ? $t('products.loading') : $t('storefront.grid.load_more') }}
@@ -167,9 +188,12 @@ function catalogTarget(country, type) {
       </div>
     </section>
 
-    <section v-if="selectedCountry?.seo_text_en || selectedType?.seo_text_en" class="seo mb-60" id="seo">
+    <section v-if="selectedCountry?.seo_text_en || selectedType?.seo_text_en || (isHome && homePage)"
+             class="seo mb-60" id="seo">
       <div class="container">
         <div class="idesc">
+          <!-- Owner-authored HTML from the admin editor (the `home` content.Page row). -->
+          <div v-if="isHome && homePage" v-html="localized(homePage, 'body')"></div>
           <p v-if="selectedCountry && localized(selectedCountry, 'seo_text')">{{ localized(selectedCountry, 'seo_text') }}</p>
           <p v-if="selectedType && localized(selectedType, 'seo_text')">{{ localized(selectedType, 'seo_text') }}</p>
         </div>

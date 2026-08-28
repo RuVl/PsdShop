@@ -26,9 +26,10 @@ export const useOrderStore = defineStore('order', {
         },
         async makeOrder(email) {
             const cartStore = useCartStore();
+            // quantity goes away with the M3 checkout rework (an order holds a product once).
             const items = cartStore.cartItems.map(item => ({
                 product_id: item.id,
-                quantity: item.quantity,
+                quantity: 1,
             }));
 
             const redirect_url = await this._checkout(email, items);
@@ -39,7 +40,7 @@ export const useOrderStore = defineStore('order', {
         async buyProduct(product, email) {
             window.location.href = await this._checkout(email, [{
                 product_id: product.id,
-                quantity: product.quantity,
+                quantity: 1,
             }]);
         }
     }

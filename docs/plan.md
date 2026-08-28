@@ -165,13 +165,14 @@ PaymentCallbackLog  без изменений
 живёт в localStorage; каталожный API для SPA — `GET /api/catalog/countries/`,
 `GET /api/catalog/document-types/`, `GET /api/catalog/products/?country=&type=&page=`,
 `GET /api/catalog/products/<id>/` (оба языка в каждом ответе, страница = 24 карточки — та же
-константа, что у серверной пагинации).
+константа, что у серверной пагинации); контентный API — `GET /api/content/pages/`,
+`GET /api/content/pages/<slug>/` (в том числе `home` — SEO-блок главной),
+`GET /api/content/slides/`, `GET /api/content/settings/`.
 
-Удаляется: `GET /api/exchange-rates/` (R3, USD).
+Удалены: `GET /api/exchange-rates/` и валютные ручки — цены только в USD.
 
-В `sales/serializers.py`: из `OrderItemSerializer` уходит `quantity`, из `OrderSerializer` —
-конвертация валют и проверка остатков; `AllocationSerializer` превращается в
-`PurchaseItemSerializer` с полями токена.
+В `sales/serializers.py` количеств и конвертации валют больше нет; выдачу описывает
+`PurchaseItemSerializer` с полями токена. Чекаут переписывается на M3.
 
 ## 5. Этапы
 
@@ -182,12 +183,13 @@ _Готово, когда:_ в админке заводится товар с �
 `make dev-test` зелёный.
 
 **M2 — витрина.** Приложение `storefront` (бот-страницы + shell, UA-развилка, `seo.py`),
-каталожный API, SPA по `design/index.html` и `design/product.html` (роутер с префиксом языка,
-каталог, карточка товара, плавающая корзина). Остались на M2b: страницы `Page`, слайдер из
-админки, бесконечная прокрутка поверх `?page=N`.
+каталожный и контентный API, SPA по `design/index.html` и `design/product.html`: роутер с
+префиксом языка, каталог, карточка товара, плавающая корзина, страницы `Page` в меню, слайдер
+из админки, бесконечная прокрутка поверх `?page=N`.
 _Готово, когда:_ обе языковые версии открываются, фильтры работают без перезагрузки, бот
 получает полный HTML на тех же URL, вёрстка совпадает с макетом на ширинах от 320 до 1920
-(`responsive-craft`).
+(`responsive-craft`), **и сценарий пройден руками в браузере** (каталог, фильтр, карточка,
+добавление в корзину, корзина, смена языка).
 
 **M3 — покупка.** Острова корзины и чекаута, экспресс-покупка одного товара, `POST /api/order/` без
 количеств, выдача токенов на `OrderItem`, страница покупок, письма, отписка. Полностью

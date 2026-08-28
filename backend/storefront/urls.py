@@ -43,6 +43,9 @@ urlpatterns = [
     path("purchases/", views.spa, name="purchases"),
     path("purchases/<uuid:token>/", views.spa, name="purchases-token"),
     path("unsubscribe/<str:token>/", views.spa, name="unsubscribe"),
+    # A single segment is an owner-written page (content.Page); reserved roots are blocked on the
+    # model, and a country never answers alone - it always carries the second segment.
+    path("<slug:page_slug>/", views.page, name="page"),
     path("<country:country>/<slug:doctype>/", views.catalog, name="catalog"),
     path("<country:country>/<slug:doctype>/<productslug:product_slug>/", views.product, name="product"),
 ]
