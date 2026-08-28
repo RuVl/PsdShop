@@ -13,12 +13,11 @@ from django.template import TemplateDoesNotExist
 from django.template.loader import get_template
 
 from catalog.models import Country, DocumentType, Product
+from catalog.views import PAGE_SIZE
 from storefront import seo
 from storefront.bots import is_bot
 
 logger = logging.getLogger(__name__)
-
-PAGE_SIZE = 24
 
 SHELL_TEMPLATE = "storefront/shell.html"
 

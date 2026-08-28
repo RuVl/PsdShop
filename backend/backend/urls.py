@@ -24,6 +24,7 @@ from django.urls import include, path
 # No language prefix: the admin, the API and the Plisio callback are not part of the storefront.
 urlpatterns = [
     path("admin/", admin.site.urls),
+    path("api/", include("catalog.urls")),
     path("api/", include("mailing.urls")),
     path("api/", include("sales.urls")),
 ]
