@@ -1,8 +1,9 @@
 <script setup>
 import {computed, nextTick, onBeforeUnmount, ref, watch} from 'vue';
-import {useRoute, useRouter} from 'vue-router';
+import {useRoute} from 'vue-router';
 import GLightbox from 'glightbox';
 import 'glightbox/dist/css/glightbox.min.css';
+import BuyModal from '@/components/storefront/BuyModal.vue';
 import CountrySidebar from '@/components/storefront/CountrySidebar.vue';
 import IconCart from '@/components/icons/IconCart.vue';
 import {fetchProduct} from '@/api/catalog.js';
@@ -13,7 +14,6 @@ import {useLocalized} from '@/composables/localized.js';
 // The product page per design/product.html: breadcrumbs, the shared sidebar, a gallery with
 // a glightbox zoom, and the buy block. The `<id>-<slug>` URL segment resolves by the id.
 const route = useRoute();
-const router = useRouter();
 const cart = useCartStore();
 const catalogStore = useCatalogStore();
 const localized = useLocalized();
@@ -58,11 +58,8 @@ function addToCart() {
     cart.addItem(product.value);
 }
 
-function buyNow() {
-    // Express checkout arrives with M3; until then "buy now" leads through the cart.
-    cart.addItem(product.value);
-    router.push({name: 'cart', params: {lang: lang.value}});
-}
+// Express checkout: one template, paid for without ever entering the cart.
+const buying = ref(false);
 </script>
 
 <template>
@@ -134,7 +131,7 @@ function buyNow() {
                       <div class="text-mid black">$<span class="primary">{{ product.price }}</span></div>
                     </div>
                     <div class="product-item__controls">
-                      <button class="button" type="button" @click="buyNow">{{ $t('buttons.buy_now') }}</button>
+                      <button class="button" type="button" @click="buying = true">{{ $t('buttons.buy_now') }}</button>
                       <button class="button button-cart" type="button" :disabled="inCart"
                               :title="inCart ? $t('storefront.card.in_cart') : $t('buttons.add2cart')"
                               @click="addToCart">
@@ -148,6 +145,8 @@ function buyNow() {
           </div>
         </div>
       </section>
+
+      <BuyModal v-model:open="buying" :product="product"/>
     </template>
   </main>
 </template>

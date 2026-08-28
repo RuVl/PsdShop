@@ -1,6 +1,7 @@
 <script setup>
-import {computed} from 'vue';
-import {useRoute, useRouter} from 'vue-router';
+import {computed, ref} from 'vue';
+import {useRoute} from 'vue-router';
+import BuyModal from '@/components/storefront/BuyModal.vue';
 import IconCart from '@/components/icons/IconCart.vue';
 import {useCartStore} from '@/stores/cart.js';
 import {useLocalized} from '@/composables/localized.js';
@@ -13,7 +14,6 @@ const props = defineProps({
 });
 
 const route = useRoute();
-const router = useRouter();
 const cart = useCartStore();
 const localized = useLocalized();
 
@@ -33,11 +33,8 @@ function addToCart() {
     cart.addItem(props.product);
 }
 
-function buyNow() {
-    // Express checkout arrives with M3; until then "buy now" leads through the cart.
-    cart.addItem(props.product);
-    router.push({name: 'cart', params: {lang: route.params.lang || 'en'}});
-}
+// Express checkout: one template, paid for without ever entering the cart.
+const buying = ref(false);
 </script>
 
 <template>
@@ -61,13 +58,15 @@ function buyNow() {
         <div class="product-item-prop-content">$<span class="product-item-prop-value">{{ product.price }}</span></div>
       </div>
       <div class="product-item-controls">
-        <button class="button" type="button" @click="buyNow">{{ $t('buttons.buy_now') }}</button>
+        <button class="button" type="button" @click="buying = true">{{ $t('buttons.buy_now') }}</button>
         <button class="button button-cart" type="button" :disabled="inCart"
                 :title="inCart ? $t('storefront.card.in_cart') : $t('buttons.add2cart')" @click="addToCart">
           <IconCart size="small"/>
         </button>
       </div>
     </div>
+
+    <BuyModal v-model:open="buying" :product="product"/>
   </div>
 </template>
 
