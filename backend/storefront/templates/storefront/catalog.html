@@ -1,0 +1,89 @@
+{% extends "storefront/base.html" %}
+{% load static i18n %}
+
+{% block content %}
+{% with country_slug=selected_country.slug|default:"all" type_slug=selected_type.slug|default:"all" %}
+
+<div class="bgs-header">
+    <section class="home" id="home">
+        <div class="container">
+            <div class="home__body">
+                <div class="home__block">
+                    <h1 class="home__title title white">{% translate "Online store of PDF files" %}</h1>
+                    <p class="home__text text white">{% translate "Editable proof-of-address documents, utility bills and bank statements in PDF. Delivered by a download link right after payment." %}</p>
+                </div>
+                <picture class="home__img"><img src="{% static 'storefront/img/home/home-img.png' %}" alt="Decor"></picture>
+            </div>
+        </div>
+    </section>
+</div>
+
+<main class="main-content">
+    <section class="shop mb-60">
+        <div class="container">
+            <div class="shop__body">
+                {% include "storefront/_sidebar.html" %}
+
+                <div class="shop__right-block">
+                    <div class="text black">{% translate "Product list" %}</div>
+                    <div class="products section">
+                        <h2 class="title-section title black">
+                            {% if selected_country %}{{ selected_country.name }}{% else %}{% translate "All products" %}{% endif %}
+                            {% if selected_type %} — {{ selected_type.name }}{% endif %}
+                        </h2>
+
+                        <div class="filter-products">
+                            <div class="text-small black">{% translate "Filter products" %}</div>
+                            <div class="filter-products-content">
+                                <div class="filter-products-right">
+                                    <div class="filter-products-card-list">
+                                        <a class="filter-products-card-list-item filter-products-btn {% if not selected_type %}current{% endif %}"
+                                           href="{% url 'storefront:catalog' country=country_slug doctype='all' %}">{% translate "All categories" %}</a>
+                                        {% for dtype in document_types %}
+                                        <a class="filter-products-card-list-item filter-products-btn {% if dtype == selected_type %}current{% endif %}"
+                                           href="{% url 'storefront:catalog' country=country_slug doctype=dtype.slug %}">{{ dtype.name }}</a>
+                                        {% endfor %}
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="products-list">
+                            {% for product in products %}
+                                {% include "storefront/_product_card.html" %}
+                            {% empty %}
+                                <p class="text black">{% translate "Nothing found for this selection." %}</p>
+                            {% endfor %}
+                        </div>
+
+                        {% if page_obj.has_other_pages %}
+                        <nav class="pagination">
+                            {% if page_obj.has_previous %}
+                                <a class="btn text" href="?page={{ page_obj.previous_page_number }}">{% translate "Previous" %}</a>
+                            {% endif %}
+                            <span class="text black">{{ page_obj.number }} / {{ page_obj.paginator.num_pages }}</span>
+                            {% if page_obj.has_next %}
+                                <a class="btn text" href="?page={{ page_obj.next_page_number }}">{% translate "Next" %}</a>
+                            {% endif %}
+                        </nav>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    {% if selected_country.seo_text or selected_type.seo_text %}
+    <section class="seo mb-60" id="seo">
+        <div class="container">
+            <div class="idesc">
+                {% if selected_country.seo_text %}<p>{{ selected_country.seo_text }}</p>{% endif %}
+                {% if selected_type.seo_text %}<p>{{ selected_type.seo_text }}</p>{% endif %}
+            </div>
+        </div>
+    </section>
+    {% endif %}
+</main>
+
+{% endwith %}
+{% endblock %}

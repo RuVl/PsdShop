@@ -1,0 +1,11 @@
+<title>{{ meta.title }}</title>
+<meta name="description" content="{{ meta.description }}">
+{% if meta.noindex %}<meta name="robots" content="noindex">{% endif %}
+<link rel="canonical" href="{{ meta.canonical }}">
+{% for code, url in meta.alternates %}<link rel="alternate" hreflang="{{ code }}" href="{{ url }}">
+{% endfor %}<meta property="og:title" content="{{ meta.title }}">
+<meta property="og:description" content="{{ meta.description }}">
+<meta property="og:type" content="{{ meta.og_type }}">
+<meta property="og:url" content="{{ meta.canonical }}">
+{% if meta.og_image %}<meta property="og:image" content="{{ meta.og_image }}">{% endif %}
+{% if meta.ld_json %}<script type="application/ld+json">{{ meta.ld_json }}</script>{% endif %}

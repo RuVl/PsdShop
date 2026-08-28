@@ -25,7 +25,11 @@ What is decided but **not yet in the code** (each stage is R1..R7 in the plan):
 | A product is a template sold any number of times - no `StockItem`, no `Allocation`, no reservation | [0001](./docs/adr/0001-unlimited-copies-no-reservation.md) | R2 |
 | Catalog is country x document type x year, with a gallery and a product page | [0008](./docs/adr/0008-catalog-country-type-year.md) | R1 |
 | Prices are USD only - `djmoney` and exchange rates go away | [0006](./docs/adr/0006-single-currency-usd.md) | R3 |
-| Meta tags rendered by Django instead of a build-time prerender (`proposed`) | [0007](./docs/adr/0007-seo-for-a-spa.md) | R6 |
+
+Already **in** the code: dynamic rendering ([ADR-0010](./docs/adr/0010-dynamic-rendering.md)) -
+every storefront URL answers two ways from one view: search bots get the full Django-rendered
+page, people get the SPA shell (the vite-built `index.html` with this page's meta injected), and
+the Vue SPA takes over from there. ADR-0007 and ADR-0009 are superseded by it.
 
 Everything below describes the code **as it is now** unless a line says otherwise.
 
@@ -51,7 +55,8 @@ make down          # stop; make ps / make logs[-backend|-db|-nginx]
 make dev-infra     # postgres only (docker-compose.dev.yaml), published to localhost:5432
 make dev-migrate   # migrate with the host backend against the dev db
 make dev-backend   # runserver 0.0.0.0:8000 on the host
-make dev-frontend  # vite dev server on 0.0.0.0:5173 (host); make dev-frontend-build for prod build
+make dev-frontend  # vite dev server on 0.0.0.0:5173 (host; proxies /static and /media to :8000)
+make spa           # production SPA build: hashed assets into backend static, shell.html into templates
 make dev-superuser / make dev-infra-down
 make dev-reset     # recreate the dev-postgres container (keeps the psdshop_postgres volume/data)
 make dev-nuke      # DROP the volume and bring an empty db up - needed after migrations are regenerated
@@ -329,10 +334,12 @@ DKIM-signing relay is available as the `mail` service in `docker-compose.yaml`, 
 
 Both ends are bilingual (en/ru). Backend uses **django-modeltranslation** for model content -
 translated fields are declared in `catalog/translation.py` and `mailing/translation.py`
-(`Broadcast.subject`, `Broadcast.body`). The catalog endpoints have no `?lang=`:
-`TranslationFieldsMixin` expands `name` into `name_en` and `name_ru` on every response, so the
-storefront picks one client-side. Frontend uses vue-i18n (`src/i18n/locales/`), and the router
-reads `?lang=` on any route, which is how a link from an e-mail opens in the right language.
+(`Broadcast.subject`, `Broadcast.body`). The catalog API has no `?lang=`: every payload carries
+both languages (`name_en` / `name_ru`), so the SPA switches without a refetch and every visitor
+gets an identical payload. **The interface language lives in the URL path prefix** (`/en/`,
+`/ru/`, `i18n_patterns` on the server, the `/:lang` route param in vue-router) - there is no
+`?lang=` anywhere anymore. Frontend uses vue-i18n (`src/i18n/locales/`); the router guard sets
+the locale from the path.
 
 **E-mail copy is gettext, and the language comes from `Customer.language`**
 ([ADR-0004](./docs/adr/0004-email-follows-the-customers-language.md)). It cannot come from the
@@ -349,7 +356,20 @@ project directory here.
 ### Frontend
 
 Vue 3 + Pinia (with `pinia-plugin-persistedstate` for the cart), Vue Router, axios. Stores in
-`src/stores/` (`cart`, `order`, `settings`, `languages`, and `currencies` until R3).
+`src/stores/` (`cart`, `catalog`, `order`, `settings`, `languages`, and `currencies` until R3).
+
+**Dynamic rendering ([ADR-0010](./docs/adr/0010-dynamic-rendering.md)).** The SPA is the whole
+interface for people; Django serves it as a shell (`storefront/shell.html`, built by `make spa`
+from `frontend/index.html` - vite injects the `{{ storefront_meta }}` / `{{ LANGUAGE_CODE }}`
+hooks at build time and moves the file into the backend templates). Bots get the Django-rendered
+pages on the same URLs. vue-router mirrors `backend/backend/urlspace.py`; keep the two in sync
+when a route is added. The catalog data comes from `/api/catalog/...` (`src/api/catalog.js`),
+and both presentations must stay content-equivalent - a catalog change lands in the bot template
+and the Vue view together.
+
+The cart is a **set** of product payloads (no quantities - an order holds a product at most
+once); `stores/cart.js` persists it, the floating `cartlequebutton` from the design is
+`components/storefront/FloatingCart.vue`.
 
 Two routes share the "my purchases" name and they are not the same page: `/purchases`
 (`views/MyPurchases.vue`) is the e-mail form you land on when the link is lost, `/purchases/:token`

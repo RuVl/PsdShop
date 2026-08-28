@@ -1,0 +1,22 @@
+# For the backend image, built from the repository root (backend/Dockerfile).
+# The frontend-nginx image keeps its own context (frontend/) and frontend/.dockerignore.
+.git/
+design/
+docs/
+postgres/
+secrets/
+
+**/__pycache__/
+**/.venv/
+**/node_modules/
+**/.env
+**/dev.env
+*.mo
+
+frontend/dist/
+backend/logs/
+backend/products/
+backend/static/
+# vite build output - rebuilt inside the image
+backend/storefront/static/storefront/spa/
+backend/storefront/templates/storefront/shell.html

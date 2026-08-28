@@ -275,3 +275,56 @@ class FlagTests(TestCase):
 
     def test_no_code_means_no_flag(self):
         self.assertEqual(Country(code="").flag, "")
+
+
+class CatalogApiTests(CatalogFactoryMixin, TestCase):
+    """The JSON the SPA reads mirrors the bot listing: same sets, same 404s, both languages."""
+
+    def setUp(self):
+        super().setUp()
+        self.product = self.make_product(name_en="Germany utility bill 2022", name_ru="Германия счёт 2022")
+        # A country with nothing on the shelf must not reach the sidebar payload.
+        Country.objects.create(name="Portugal", slug="portugal", code="pt")
+
+    def test_countries_carry_both_languages_and_counts(self):
+        (row,) = self.client.get("/api/catalog/countries/").json()
+        self.assertEqual(row["slug"], "germany")
+        self.assertEqual(row["flag"], "🇩🇪")
+        self.assertEqual(row["products_count"], 1)
+        self.assertIn("name_en", row)
+        self.assertIn("name_ru", row)
+
+    def test_document_types_skip_empty(self):
+        DocumentType.objects.create(name="Tax", slug="tax")
+        slugs = [row["slug"] for row in self.client.get("/api/catalog/document-types/").json()]
+        self.assertEqual(slugs, ["utility-bill"])
+
+    def test_products_filter_by_slugs(self):
+        response = self.client.get("/api/catalog/products/", {"country": "germany", "type": "utility-bill"})
+        payload = response.json()
+        self.assertEqual(payload["count"], 1)
+        (row,) = payload["results"]
+        self.assertEqual(row["url_slug"], self.product.url_slug)
+        self.assertEqual(row["country"], "germany")
+        self.assertEqual(row["name_ru"], "Германия счёт 2022")
+
+    def test_unknown_filter_slug_is_404_like_the_bot_page(self):
+        self.assertEqual(self.client.get("/api/catalog/products/", {"country": "atlantis"}).status_code, 404)
+
+    def test_all_means_any(self):
+        payload = self.client.get("/api/catalog/products/", {"country": "all", "type": "all"}).json()
+        self.assertEqual(payload["count"], 1)
+
+    def test_inactive_products_stay_out(self):
+        self.make_product(slug="hidden", is_active=False)
+        self.assertEqual(self.client.get("/api/catalog/products/").json()["count"], 1)
+
+    def test_detail_carries_description_and_gallery(self):
+        row = self.client.get(f"/api/catalog/products/{self.product.pk}/").json()
+        self.assertIn("description_en", row)
+        self.assertEqual(row["images"], [])
+        self.assertIsNone(row["preview"])
+
+    def test_detail_of_inactive_product_is_404(self):
+        hidden = self.make_product(slug="hidden", is_active=False)
+        self.assertEqual(self.client.get(f"/api/catalog/products/{hidden.pk}/").status_code, 404)

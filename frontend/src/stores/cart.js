@@ -1,6 +1,8 @@
 import {defineStore} from 'pinia';
-import Product from "@/models/Product.js";
 
+// A cart line is a product payload from the catalog API (both languages ride along). A product
+// is a template sold any number of times, but an order holds it at most once (ADR-0001), so
+// there are no quantities - the cart is a set.
 export const useCartStore = defineStore('cart', {
     state: () => ({
         items: [],
@@ -8,31 +10,22 @@ export const useCartStore = defineStore('cart', {
     getters: {
         cartItems: state => state.items,
         cartItemCount: state => state.items.length,
-        totalPrice: state => state.items.reduce((total, item) => total + item.amount * item.quantity, 0)
+        totalPrice: state => state.items.reduce((total, item) => total + Number(item.price), 0),
     },
     actions: {
         addItem(product) {
-            const index = this.items.findIndex(item => item.id === product.id);
-            if (index !== -1) this.items[index].quantity += product.quantity;
-            else this.items.push(product);
+            if (!this.items.some(item => item.id === product.id)) this.items.push(product);
         },
-        removeItem(product) {
-            const index = this.items.findIndex(item => item.id === product.id);
+        removeItem(id) {
+            const index = this.items.findIndex(item => item.id === id);
             if (index !== -1) this.items.splice(index, 1);
+        },
+        inCart(id) {
+            return this.items.some(item => item.id === id);
         },
         clearCart() {
             this.items = [];
-        }
+        },
     },
-    persist: {
-        serializer: {
-            deserialize: (s) => {
-                const parsed = JSON.parse(s);
-                // Convert items to product instances
-                parsed.items = parsed.items.map(item => new Product(item));
-                return parsed;
-            },
-            serialize: JSON.stringify
-        }
-    }
+    persist: true,
 });

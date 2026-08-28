@@ -12,7 +12,7 @@
 #        make init          — с нуля: deps → .env → install → pre-commit →
 #                              dev-postgres → миграции (НЕ поднимает `up`!)
 #        make dev-backend   — runserver на хосте (:8000)
-#        make front-dev     — vite dev-сервер (:5173)
+#        make dev-frontend  — vite dev-сервер (:5173)
 #
 # Оба сценария используют один и тот же volume psdshop_postgres (общие данные,
 # осознанно), но это РАЗНЫЕ контейнеры postgres — не поднимайте оба одновременно.
@@ -68,7 +68,7 @@ init: ## Подготовить окружение с нуля (deps → .env �
 	$(MAKE) install
 	$(MAKE) pre-commit-install
 	$(MAKE) dev-migrate
-	@echo "OK: dev-postgres поднят, миграции применены. Дальше: make dev-backend (backend :8000) и make front-dev (frontend :5173). Статус dev-postgres: docker compose -f docker-compose.dev.yaml ps"
+	@echo "OK: dev-postgres поднят, миграции применены. Дальше: make dev-backend (backend :8000) и make dev-frontend (frontend :5173). Статус dev-postgres: docker compose -f docker-compose.dev.yaml ps"
 
 .PHONY: check-deps
 check-deps: ## Проверить наличие uv и docker compose
@@ -269,8 +269,8 @@ psql: ## Интерактивный psql в контейнере
 dev-frontend: ## Vite dev-сервер (0.0.0.0:5173)
 	cd frontend && npm run dev
 
-.PHONY: dev-frontend-build
-dev-frontend-build: ## Production-сборка фронтенда
+.PHONY: spa
+spa: ## Собрать SPA: ассеты в backend/.../static/storefront/spa, shell.html в шаблоны Django
 	cd frontend && npm run build
 
 # --- Качество кода ----------------------------------------------------------

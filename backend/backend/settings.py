@@ -45,6 +45,7 @@ INSTALLED_APPS = [
     "rest_framework",
     "corsheaders",
     "tinymce",
+    "storefront",
     "catalog",
     "content",
     "customer",
@@ -77,8 +78,10 @@ TEMPLATES = [
             "context_processors": [
                 "django.template.context_processors.debug",
                 "django.template.context_processors.request",
+                "django.template.context_processors.i18n",
                 "django.contrib.auth.context_processors.auth",
                 "django.contrib.messages.context_processors.messages",
+                "storefront.context_processors.site_settings",
             ],
         },
     },
@@ -192,6 +195,13 @@ TIME_ZONE = "UTC"
 # Static files (CSS, JavaScript, Images)
 STATIC_URL = "static/"
 STATIC_ROOT = BASE_DIR / "static"
+
+# Plain static storage: the SPA assets are hashed by vite itself, and the remaining Django-served
+# static (bot-page CSS, admin) needs no cache-busting manifest.
+STORAGES = {
+    "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
+    "staticfiles": {"BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"},
+}
 
 # Uploads live on the `products` volume, split by who is allowed to read them.
 #

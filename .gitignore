@@ -28,6 +28,10 @@ backend/products/
 # Collected static files (collectstatic)
 backend/static/
 
+# Vite-built SPA (build output; `make spa` regenerates them)
+backend/storefront/static/storefront/spa/
+backend/storefront/templates/storefront/shell.html
+
 # Compiled gettext catalogues (built by startup.sh / `make compilemessages`)
 *.mo
 

@@ -1,0 +1,44 @@
+{% load static i18n %}
+                <div class="shop__left-block">
+                    <div class="text black">{% translate "Store categories" %}</div>
+                    <div class="categories section">
+                        {% if popular_countries %}
+                        <div class="categories__popular">
+                            <div class="categories__title">
+                                <picture class="categories__icon"><img src="{% static 'storefront/img/icons/popular.png' %}" alt=""></picture>
+                                <div class="text-small black">{% translate "Popular" %}</div>
+                            </div>
+                            <ul class="categories__list">
+                                {% for country in popular_countries %}
+                                <li class="categories__item {% if country == selected_country %}current{% endif %}">
+                                    <a href="{% url 'storefront:catalog' country=country.slug doctype=type_slug %}">
+                                        <span class="categories__item-icon">{{ country.flag }}</span>
+                                        <span class="categories__item-title text black">{{ country.name }}</span>
+                                        <span class="categories__item-count badge text-small primary">{{ country.products_count }}</span>
+                                    </a>
+                                </li>
+                                {% endfor %}
+                            </ul>
+                        </div>
+                        {% endif %}
+                        <div class="categories__all">
+                            <div class="text-small black">{% translate "All categories" %}</div>
+                            <ul class="categories__list">
+                                <li class="categories__item {% if not selected_country %}current{% endif %}">
+                                    <a href="{% url 'storefront:catalog' country='all' doctype=type_slug %}">
+                                        <span class="categories__item-title text black">{% translate "All countries" %}</span>
+                                    </a>
+                                </li>
+                                {% for country in countries %}
+                                <li class="categories__item {% if country == selected_country %}current{% endif %}">
+                                    <a href="{% url 'storefront:catalog' country=country.slug doctype=type_slug %}">
+                                        <span class="categories__item-icon">{{ country.flag }}</span>
+                                        <span class="categories__item-title text black">{{ country.name }}</span>
+                                        <span class="categories__item-count badge text-small primary">{{ country.products_count }}</span>
+                                    </a>
+                                </li>
+                                {% endfor %}
+                            </ul>
+                        </div>
+                    </div>
+                </div>
