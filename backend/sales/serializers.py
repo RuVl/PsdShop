@@ -124,20 +124,3 @@ class PurchaseOrderSerializer(serializers.ModelSerializer):
     class Meta:
         model = Order
         fields = ["id", "status", "total_price", "created_at", "paid_at", "items"]
-
-
-class CartItemSerializer(serializers.ModelSerializer):
-    """
-    What the cart needs to draw a line: the cart itself lives in the browser, so the storefront
-    asks for these by id (see ADR-0009).
-    """
-
-    preview_url = serializers.SerializerMethodField()
-
-    class Meta:
-        model = Product
-        fields = ["id", "name", "price", "preview_url"]
-
-    def get_preview_url(self, obj: Product) -> str | None:
-        preview = obj.preview
-        return preview.card.url if preview and preview.card else None

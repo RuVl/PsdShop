@@ -72,7 +72,12 @@ class BroadcastEmailTests(TestCase):
         self.assertIn(f"/unsubscribe/{token}", message.alternatives[0].content)
 
     def test_the_unsubscribe_link_carries_the_customers_language(self):
-        self.assertIn("lang=ru", self.build().body)
+        """The language is the path prefix now (ADR-0010) - `?lang=` is gone from every URL."""
+
+        body = self.build().body
+
+        self.assertIn("/ru/unsubscribe/", body)
+        self.assertNotIn("lang=", body)
 
     def test_the_list_unsubscribe_header_is_set(self):
         message = self.build()

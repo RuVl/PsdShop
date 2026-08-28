@@ -643,6 +643,16 @@ class PurchasesMailTests(SalesFactoryMixin, TestCase):
         self.assertNotEqual(mail.outbox[0].subject, "")
         self.assertEqual(mail.outbox[0].to, [self.customer.email])
 
+    def test_the_link_opens_the_page_in_the_customers_language(self):
+        """The language is a path prefix, and the browser that will open the link is not here."""
+
+        self.customer.set_language("ru")
+
+        with translation.override("en"):
+            send_purchases_link(RequestFactory().get("/"), self.customer)
+
+        self.assertIn(f"/ru/purchases/{self.customer.access_token}/", mail.outbox[0].body)
+
 
 class SendDownloadLinksTests(SalesFactoryMixin, TestCase):
     def setUp(self):
@@ -855,7 +865,7 @@ class CartItemsTests(SalesFactoryMixin, TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(len(response.data), 1)
-        self.assertEqual(response.data[0]["name"], self.product.name)
+        self.assertEqual(response.data[0]["name_en"], self.product.name)
         self.assertEqual(Decimal(response.data[0]["price"]), Decimal("12.50"))
 
     def test_an_inactive_product_is_simply_absent(self):
@@ -869,21 +879,26 @@ class CartItemsTests(SalesFactoryMixin, TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data, [])
 
-    def test_the_name_follows_the_language_the_page_asks_for(self):
-        """The API is outside the language prefix, so the cart says which language it draws in."""
+    def test_both_languages_ride_along(self):
+        """No `?lang=` anywhere in the API (ADR-0010): every visitor gets the same payload."""
 
         self.product.name_ru = "Счёт за коммуналку"
         self.product.save(update_fields=["name_ru"])
 
         response = self.client.get(reverse("cart-items"), {"ids": str(self.product.pk), "lang": "ru"})
 
-        self.assertEqual(response.data[0]["name"], "Счёт за коммуналку")
+        self.assertEqual(response.data[0]["name_ru"], "Счёт за коммуналку")
+        self.assertEqual(response.data[0]["name_en"], self.product.name)
 
-    def test_an_unknown_language_falls_back_instead_of_failing(self):
-        response = self.client.get(reverse("cart-items"), {"ids": str(self.product.pk), "lang": "xx"})
+    def test_a_line_carries_what_the_grid_card_carries(self):
+        """The cart draws the same card the catalog does, so it needs the same fields."""
 
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.data[0]["name"], self.product.name)
+        row = self.items(str(self.product.pk)).data[0]
+
+        self.assertEqual(
+            set(row),
+            {"id", "url_slug", "name_en", "name_ru", "price", "year", "country", "document_type", "preview"},
+        )
 
 
 class MailOutageTests(SalesFactoryMixin, TestCase):

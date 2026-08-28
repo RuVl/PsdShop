@@ -9,17 +9,16 @@ from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.http import FileResponse, HttpResponseNotFound
-from django.utils import translation
 from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from catalog.models import Product
+from catalog.serializers import ProductListSerializer
 from customer.models import Customer
 from sales.models import Order, OrderItem, PaymentCallbackLog, Transaction
 from sales.plisio import apply_order_status, callback_to_fields
 from sales.serializers import (
-    CartItemSerializer,
     OrderSerializer,
     PurchaseItemSerializer,
     PurchaseOrderSerializer,
@@ -332,33 +331,23 @@ class RefreshAllOrderItemsView(APIView):
         return Response(serializer.data)
 
 
-def _requested_language(request) -> str:
-    """`?lang=` when it names a language we have, otherwise whatever LocaleMiddleware settled on."""
-
-    requested = request.query_params.get("lang", "")
-    known = {code for code, _name in settings.LANGUAGES}
-
-    return requested if requested in known else translation.get_language()
-
-
 class CartItemsView(APIView):
     """
     Products by id, for the cart that lives in the browser.
 
-    The cart is localStorage (ADR-0009), so the server cannot render it from state it does not
+    The cart is localStorage (ADR-0010), so the server cannot render it from state it does not
     have - the page asks for the lines it holds. Unknown or deactivated ids are simply absent from
-    the answer, which is how the cart drops what is no longer on sale.
+    the answer, which is how the cart drops what is no longer on sale, and a price that moved
+    since the line was added arrives corrected.
+
+    Deliberately the catalog's own card payload: a line added from the grid and a line refreshed
+    here are then the same object, and both languages ride along like everywhere else in the API.
     """
 
     def get(self, request, *args, **kwargs):
         raw = request.query_params.get("ids", "")
         ids = [int(chunk) for chunk in raw.split(",") if chunk.strip().isdigit()][: settings.MAX_ORDER_ITEMS]
 
-        products = Product.objects.active().filter(pk__in=ids).prefetch_related("images")
-        serializer = CartItemSerializer(products, many=True, context={"request": request})
+        products = Product.objects.active().for_listing().filter(pk__in=ids)
 
-        # The API sits outside the language prefix, so the page says which language it is in.
-        # Without this the names resolve to MODELTRANSLATION_DEFAULT_LANGUAGE and a Russian
-        # storefront would draw an English cart.
-        with translation.override(_requested_language(request)):
-            return Response(serializer.data)
+        return Response(ProductListSerializer(products, many=True, context={"request": request}).data)
