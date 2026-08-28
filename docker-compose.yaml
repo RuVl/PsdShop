@@ -56,8 +56,9 @@ services:
 
   backend:
     build:
-      context: ./backend
-      dockerfile: Dockerfile
+      # Root context: the image also builds the SPA from frontend/ (see backend/Dockerfile).
+      context: .
+      dockerfile: backend/Dockerfile
     restart: unless-stopped
     volumes:
       - products_volume:/app/products

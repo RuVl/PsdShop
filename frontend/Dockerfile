@@ -1,23 +1,6 @@
-# Use node.js for building the frontend
-FROM docker.io/library/node:22.12-alpine3.21 AS build-stage
-LABEL authors="RuVl_13"
-
-# Set enviroment variables
-ENV TZ=Europe/Moscow
-
-# Prepare project directory
-WORKDIR /app
-
-# Install dependencies
-COPY package.json ./
-RUN npm install --verbose
-
-# Copy source and build frontend
-COPY . .
-RUN npm run build
-
-
-# Use nginx for serving the static files
+# nginx only: HTML comes from the backend (dynamic rendering - the SPA shell for people, the
+# rendered page for bots), so nginx serves /static and /media and proxies everything else.
+# The SPA itself is built inside the backend image (backend/Dockerfile).
 FROM docker.io/library/nginx:1.26.0
 LABEL authors="RuVl_13"
 
@@ -31,9 +14,6 @@ ENV NGINX_ENVSUBST_FILTER='DOMAIN'
 RUN apt-get update && \
     apt-get install -y gettext-base && \
     rm -rf /var/lib/apt/lists/*
-
-# Copy frontend build
-COPY --from=build-stage /app/dist /usr/share/nginx/html
 
 # Copy nginx template
 COPY nginx/site.conf.template /etc/nginx/templates/site.conf.template

@@ -36,7 +36,8 @@ export default defineConfig(({mode}) => {
 
     return {
         define: {
-            __API_URL__: JSON.stringify(env.VITE_API_URL)
+            // Same-origin /api in production (one domain); dev overrides via .env.development.
+            __API_URL__: JSON.stringify(env.VITE_API_URL || process.env.VITE_API_URL || '/api')
         },
         base: '/static/storefront/spa/',
         plugins: [
