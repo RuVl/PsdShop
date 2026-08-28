@@ -1,22 +1,47 @@
 import {fileURLToPath, URL} from 'node:url'
+import {existsSync, mkdirSync, renameSync} from 'node:fs'
 import {defineConfig, loadEnv} from 'vite'
 import vue from '@vitejs/plugin-vue'
 
-// The storefront is server-rendered by Django; vite builds only the interactive "islands" and
-// writes them, with fixed (unhashed) names, straight into the backend's static tree. Cache-busting
-// is Django's job: {% static %} rewrites to the hashed name on collectstatic (ManifestStaticFiles).
-// In development run `npm run build -- --watch`.
-export default defineConfig(({ mode }) => {
+// Dynamic rendering: humans get this SPA, search bots get Django-rendered HTML on the same
+// URLs. Vite bundles the SPA with hashed asset names into the backend static tree, and the
+// built index.html becomes the Django "shell" template: the build injects {{ ... }} hooks the
+// shell view fills with per-page meta, then moves the file into the backend templates dir.
+// `npm run dev` serves the untouched index.html - the hooks exist only in the build output.
+
+const OUT_DIR = '../backend/storefront/static/storefront/spa'
+const SHELL_TEMPLATE = '../backend/storefront/templates/storefront/shell.html'
+
+const djangoShell = () => ({
+    name: 'django-shell',
+    apply: 'build',
+    transformIndexHtml(html) {
+        return html
+            .replace('<html lang="en">', '<html lang="{{ LANGUAGE_CODE }}">')
+            // The meta builder renders <title> too, so the static one is replaced whole.
+            .replace(/<title>.*?<\/title>/, '{{ storefront_meta }}')
+    },
+    closeBundle() {
+        const shell = fileURLToPath(new URL(SHELL_TEMPLATE, import.meta.url))
+        const built = fileURLToPath(new URL(`${OUT_DIR}/index.html`, import.meta.url))
+        if (existsSync(built)) {
+            mkdirSync(fileURLToPath(new URL('.', new URL(SHELL_TEMPLATE, import.meta.url))), {recursive: true})
+            renameSync(built, shell)
+        }
+    },
+})
+
+export default defineConfig(({mode}) => {
     const env = loadEnv(mode, process.cwd(), '');
 
     return {
         define: {
             __API_URL__: JSON.stringify(env.VITE_API_URL)
         },
-        // Islands only - do not copy frontend/public/ into the backend static tree.
-        publicDir: false,
+        base: '/static/storefront/spa/',
         plugins: [
             vue(),
+            djangoShell(),
         ],
         resolve: {
             alias: {
@@ -24,18 +49,8 @@ export default defineConfig(({ mode }) => {
             }
         },
         build: {
-            outDir: '../backend/storefront/static/storefront/js',
-            emptyOutDir: false,
-            rollupOptions: {
-                input: {
-                    'cart-counter': fileURLToPath(new URL('./src/islands/cart-counter.js', import.meta.url)),
-                },
-                output: {
-                    entryFileNames: '[name].js',
-                    chunkFileNames: '[name].js',
-                    assetFileNames: '[name][extname]',
-                },
-            },
+            outDir: OUT_DIR,
+            emptyOutDir: true,
         },
     }
 })

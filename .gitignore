@@ -28,8 +28,9 @@ backend/products/
 # Collected static files (collectstatic)
 backend/static/
 
-# Vite-built storefront islands (build output; `make islands` regenerates them)
-backend/storefront/static/storefront/js/
+# Vite-built SPA (build output; `make spa` regenerates them)
+backend/storefront/static/storefront/spa/
+backend/storefront/templates/storefront/shell.html
 
 # Compiled gettext catalogues (built by startup.sh / `make compilemessages`)
 *.mo
