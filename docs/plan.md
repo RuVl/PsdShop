@@ -14,12 +14,12 @@
 | Товар — шаблон, продаётся неограниченно; ни стока, ни резервов | [ADR-0001](./adr/0001-unlimited-copies-no-reservation.md) |
 | Каталог: страна × тип документа × год, галерея картинок | [ADR-0008](./adr/0008-catalog-country-type-year.md) |
 | Цены только в USD, `djmoney` уходит | [ADR-0006](./adr/0006-single-currency-usd.md) |
-| Витрину рендерит Django, Vue остаётся островами | [ADR-0009](./adr/0009-server-rendered-storefront.md) |
-| Язык в URL, обе версии в индексе, мета и sitemap с сервера | [ADR-0007](./adr/0007-seo-for-a-spa.md) |
+| Динамический рендеринг: SPA людям, Django-HTML ботам, один URL | [ADR-0010](./adr/0010-dynamic-rendering.md) |
+| Язык в URL, обе версии в индексе, мета и sitemap с сервера | [ADR-0010](./adr/0010-dynamic-rendering.md) |
 | Миграции пишутся с нуля, старая цепочка удаляется | этот файл, M1 |
 | Товары заводятся руками в админке, без генерации текстов и импорта | этот файл, M1 |
 | Картинки жмёт бэкенд (Pillow), отдаём webp + png | этот файл, M1 |
-| Корзина остаётся в localStorage | [ADR-0009](./adr/0009-server-rendered-storefront.md) |
+| Корзина остаётся в localStorage | [ADR-0010](./adr/0010-dynamic-rendering.md) |
 | «Купить сейчас» — экспресс-чекаут одного товара, корзину не трогает | этот файл, M3 |
 | Бесконечная прокрутка поверх настоящих страниц `?page=N` | этот файл, M2 |
 | Тексты, мета, страницы, слайды — редактируются в админке | этот файл, M1 |
@@ -67,29 +67,20 @@
 
 ### Рендеринг
 
-Django отдаёт готовый HTML со всем текстом и ссылками. Vue живёт точечно, в местах с состоянием;
-разметку он не дублирует, а монтируется в подготовленные узлы. Подробности и обоснование —
-[ADR-0009](./adr/0009-server-rendered-storefront.md).
+Динамический рендеринг ([ADR-0010](./adr/0010-dynamic-rendering.md)): все HTML-запросы приходят
+в Django, вьюха решает по `User-Agent`. Бот получает полный серверный HTML
+(`storefront/templates/`), человек — **shell**: собранный vite `index.html` с метой страницы,
+подставленной в `<head>`; дальше работает Vue SPA (vue-router зеркалит URL-пространство, данные
+из `/api/catalog/...`). Мета строится одной функцией на маршрут (`storefront/seo.py`) и попадает
+в обе подачи — это страховка эквивалентности контента.
 
-Острова (точки входа vite):
+Интерфейс целиком Vue: шапка, каталог, карточка, корзина, покупки, отписка. Плавающая корзина
+из дизайна (`cartlequebutton`) — компонент с pinia-стором. `glightbox` остаётся библиотекой:
+своих стилей лайтбокса в макете нет, перерисовывать вид смысла нет. jQuery, remodal и swiper
+не переносятся; слайдер — свой (~60 строк, стили стрелок уже в макете).
 
-| Остров | Где | Что делает |
-|---|---|---|
-| `cart-counter` | шапка всех страниц | читает localStorage, рисует число |
-| `cart` | `/cart/` | список товаров из localStorage, удаление, итог, переход к оплате |
-| `checkout` | карточка, грид, корзина | модалка: почта, язык, `POST /api/order/`, ошибки, редирект на Plisio |
-| `purchases` | `/purchases/<token>/` | список покупок, обновление ссылок поштучно и списком |
-| `send-links` | `/purchases/` | форма восстановления доступа |
-| `unsubscribe` | `/unsubscribe/<token>/` | подтверждение отписки |
-
-Vanilla, без Vue: бургер, приветственный слайдер (swiper выкинут, ~60 строк своего кода — стили
-стрелок уже в макете), фильтры с подменой грида и бесконечная прокрутка. `glightbox` остаётся
-библиотекой: своих стилей лайтбокса в макете нет, перерисовывать вид смысла нет. jQuery, remodal
-и swiper не переносятся.
-
-Фильтры и прокрутка работают так: сервер рендерит грид и настоящую ссылку `?page=N`, скрипт
-перехватывает её, тянет тот же URL с `?partial=1`, подменяет `.products-list` и двигает историю
-через `pushState`. Робот идёт по ссылкам, человек не видит перезагрузок.
+Фильтры и пагинация — обычные SPA-переходы по настоящим URL (`/en/<country>/<type>/`,
+`?page=N`); робот на тех же адресах получает серверные страницы со ссылками.
 
 ### Файлы
 
@@ -108,10 +99,10 @@ backend/products/private/   платные файлы - PRODUCT_FILES_ROOT, ни
 
 ### Статика
 
-`design/style.css`, `img/`, `fonts/` переезжают в `backend/storefront/static/storefront/` как есть.
-Хеширование имён делает `ManifestStaticFilesStorage` на `collectstatic` — отдельный механизм
-кеш-бастинга не нужен. Vite собирает **только** острова, с фиксированными именами файлов, прямо в
-`static/storefront/js/`; в разработке — `npm run build -- --watch`.
+`design/style.css`, `img/`, `fonts/` живут в `backend/storefront/static/storefront/` — их делят
+бот-шаблоны и SPA (в разработке vite dev server проксирует `/static` на бэкенд). Vite собирает
+SPA с собственным хешированием имён в `static/storefront/spa/`, а `index.html` с Django-хуками
+меты переносит в шаблоны как `shell.html` (`make spa`). Отдельного manifest-хранилища нет.
 
 ## 3. Целевая схема
 
@@ -170,10 +161,13 @@ PaymentCallbackLog  без изменений
 `POST /api/purchases/<token>/refresh-all/`, `GET /api/files/<uuid>/`,
 `GET|POST /api/unsubscribe/<token>/`.
 
-Добавляется: `GET /api/cart/items/?ids=1,2,3` — названия, цены и превью для корзины, которая живёт
-в localStorage.
+Добавляются: `GET /api/cart/items/?ids=1,2,3` — названия, цены и превью для корзины, которая
+живёт в localStorage; каталожный API для SPA — `GET /api/catalog/countries/`,
+`GET /api/catalog/document-types/`, `GET /api/catalog/products/?country=&type=&page=`,
+`GET /api/catalog/products/<id>/` (оба языка в каждом ответе, страница = 24 карточки — та же
+константа, что у серверной пагинации).
 
-Удаляются: `GET /api/countries/` и `GET /api/exchange-rates/` — каталог рендерится на сервере.
+Удаляется: `GET /api/exchange-rates/` (R3, USD).
 
 В `sales/serializers.py`: из `OrderItemSerializer` уходит `quantity`, из `OrderSerializer` —
 конвертация валют и проверка остатков; `AllocationSerializer` превращается в
@@ -187,11 +181,13 @@ PaymentCallbackLog  без изменений
 _Готово, когда:_ в админке заводится товар с файлом и картинками, варианты картинок создаются,
 `make dev-test` зелёный.
 
-**M2 — витрина.** Приложение `storefront`: `i18n_patterns`, роуты из раздела 2, шаблоны по
-`design/index.html` и `design/product.html`, статика, острова `ui` и `catalog`, фильтры с подменой
-грида, бесконечная прокрутка, страницы `Page`, слайдер из админки.
-_Готово, когда:_ обе языковые версии открываются, фильтры работают без перезагрузки, вёрстка
-совпадает с макетом на ширинах от 320 до 1920 (`responsive-craft`).
+**M2 — витрина.** Приложение `storefront` (бот-страницы + shell, UA-развилка, `seo.py`),
+каталожный API, SPA по `design/index.html` и `design/product.html` (роутер с префиксом языка,
+каталог, карточка товара, плавающая корзина). Остались на M2b: страницы `Page`, слайдер из
+админки, бесконечная прокрутка поверх `?page=N`.
+_Готово, когда:_ обе языковые версии открываются, фильтры работают без перезагрузки, бот
+получает полный HTML на тех же URL, вёрстка совпадает с макетом на ширинах от 320 до 1920
+(`responsive-craft`).
 
 **M3 — покупка.** Острова корзины и чекаута, экспресс-покупка одного товара, `POST /api/order/` без
 количеств, выдача токенов на `OrderItem`, страница покупок, письма, отписка. Полностью
@@ -206,9 +202,10 @@ BreadcrumbList), `sitemap.xml` с hreflang, `robots.txt`, canonical, 301 с `all
 _Готово, когда:_ `curl` показывает текст страницы без JS, у каждой страницы уникальные title и
 description, карта сайта валидна и содержит обе языковые версии.
 
-**M5 — подчистка и документация.** Удаление vue-router, vue-i18n, SPA-вьюх, `djmoney` и
-`djmoney.contrib.exchange`, целей `update-rates` и `expire`; обновление `CLAUDE.md` и `CONTEXT.md`
-под фактическое состояние.
+**M5 — подчистка и документация.** Удаление `currencies`-стора и прочего валютного кода на
+фронте, `djmoney` и `djmoney.contrib.exchange`, целей `update-rates` и `expire`; обновление
+`CLAUDE.md` и `CONTEXT.md` под фактическое состояние. (vue-router и vue-i18n остаются —
+ADR-0010.)
 _Готово, когда:_ `make lint` и тесты зелёные, в коде нет упоминаний стока и валютных курсов.
 
 Порядок строгий: M1 → M2 → M3 → M4 → M5. Каждый этап — своя ветка `feature/...` с PR в `dev`.
@@ -224,12 +221,14 @@ _Готово, когда:_ `make lint` и тесты зелёные, в код�
 make dev-infra && make dev-migrate            # база
 make dev-manage c="seed_testdata --flush"     # каталог
 make dev-backend                              # :8000
-cd frontend && npm run build -- --watch       # острова
+make dev-frontend                             # vite dev server :5173 (проксирует /static и /media на :8000)
+make spa                                      # прод-сборка: shell.html + ассеты в backend-дерево
 
 make dev-test                                 # тесты
 make lint                                     # ruff
-curl -s localhost:8000/en/germany/all/ | grep -c "products-item"   # HTML без JS
-curl -sI localhost:8000/ | grep -i location                        # редирект по языку
+curl -s -A Googlebot localhost:8000/en/germany/all/ | grep -c "products-item"  # бот: HTML без JS
+curl -s localhost:8000/en/germany/all/ | grep "og:title"                       # человек: shell с метой
+curl -sI localhost:8000/ | grep -i location                                    # редирект по языку
 ```
 
 Сквозной сценарий оплаты гоняется тестом с поддельным callback (как в текущем `sales/tests.py`),
