@@ -10,7 +10,8 @@ from decimal import Decimal
 from io import BytesIO
 
 from django.core.files.base import ContentFile
-from django.core.management.base import BaseCommand
+from django.core.management.base import BaseCommand, CommandError
+from django.db.models import ProtectedError
 from django.db.transaction import atomic
 
 from catalog.models import Country, DocumentType, Product, ProductImage
@@ -60,7 +61,17 @@ class Command(BaseCommand):
     @atomic
     def handle(self, *args, **options):
         if options["flush"]:
-            deleted = Product.objects.all().delete()
+            try:
+                deleted = Product.objects.all().delete()
+            except ProtectedError as error:
+                # A sold product cannot be deleted - `OrderItem.product` is PROTECT, so the file
+                # outlives the sale (ADR-0001). Say that instead of dumping the traceback.
+                sold = {item.order_id for item in error.protected_objects}
+                raise CommandError(
+                    f"Some products have been sold and cannot be deleted (orders: {sorted(sold)}). "
+                    f"Wipe the whole dev database with `make dev-nuke` if that is what you want."
+                ) from error
+
             Country.objects.all().delete()
             DocumentType.objects.all().delete()
             Page.objects.all().delete()
