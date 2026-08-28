@@ -18,7 +18,7 @@ payment, delivery, broadcasts and admin statistics are reused; the catalog, the 
 the currency and the whole design are being replaced. The roadmap, target schema and open
 questions live in [`docs/plan.md`](./docs/plan.md) - **read it before changing models**.
 
-Already **in** the code (stages M1 and M2 of the plan):
+Already **in** the code (stages M1, M2 and M3 of the plan):
 
 | Decision | ADR |
 |---|---|
@@ -26,10 +26,11 @@ Already **in** the code (stages M1 and M2 of the plan):
 | Catalog is country x document type x year, with a gallery and a product page | [0008](./docs/adr/0008-catalog-country-type-year.md) |
 | Prices are USD only - `djmoney` and exchange rates are gone | [0006](./docs/adr/0006-single-currency-usd.md) |
 | Dynamic rendering: every storefront URL answers twice from one view - search bots get the full Django-rendered page, people get the SPA shell (the vite-built `index.html` with this page's meta injected) and the Vue SPA takes over. ADR-0007 and ADR-0009 are superseded by it. | [0010](./docs/adr/0010-dynamic-rendering.md) |
+| Buying is one modal: the cart, or one template bought straight off a card ("buy now"), and the mail carries one link to the purchases page | [0002](./docs/adr/0002-customer-and-purchases-page.md) |
 
-**Still to do: M3 (checkout, purchases page, delivery e-mails on the new schema), M4 (sitemap.xml,
-robots.txt) and M5 (final cleanup).** The order/callback/delivery code below is still Verdoc-era
-where it touches the checkout.
+**Still to do: M4 (sitemap.xml, robots.txt) and M5 (final cleanup, plus the design corrections the
+owner is collecting).** The Verdoc component set is gone from the frontend - every view is drawn
+with the design's own classes.
 
 Everything below describes the code **as it is now** unless a line says otherwise.
 
@@ -154,8 +155,10 @@ payment, delivery), `mailing` (broadcasts).
    ([ADR-0001](./docs/adr/0001-unlimited-copies-no-reservation.md),
    [ADR-0008](./docs/adr/0008-catalog-country-type-year.md)). A product is taken off the shelf with
    `is_active=False`, never deleted - `OrderItem.product` is `PROTECT`.
-2. **Checkout** - `POST /api/order/` (`OrderCreateView` + `OrderSerializer`). Gets/creates the
-   `Customer`, computes `total_price`, creates `Order` + `OrderItem`s **with a price snapshot**
+2. **Checkout** - `POST /api/order/` (`OrderCreateView` + `OrderSerializer`), payload
+   `{email, language, products: [id]}`: a list of ids, because an order holds a product at most
+   once and there are no quantities. Gets/creates the `Customer`, computes `total_price` **from the
+   catalog** (never from the client), creates `Order` + `OrderItem`s **with a price snapshot**
    (`product_name`, `unit_price`). Then requests a Plisio invoice; the
    URL is stored on `Order.invoice_url`, and if the request fails the order is deleted - the
    endpoint answers **502** with `{detail, code: "invoice_failed", provider_code}`, passing Plisio's
@@ -178,6 +181,12 @@ payment, delivery), `mailing` (broadcasts).
    token exists. `POST /api/send-links/` is the recovery path: it tops up anything undelivered,
    **rotates** `access_token` (this is how an old page link is revoked) and mails the new one; file
    tokens are deliberately left alone so links the customer already shared keep working.
+   - **Every link a mail carries is built with `reverse()` under
+     `translation.override(customer.language)`** (`Customer.get_purchases_url`,
+     `mailing.services.make_unsubscribe_url`), then absolutised through `backend/sites.py`. The
+     storefront routes live under `i18n_patterns`, so a path glued together by hand misses the
+     language prefix and 404s - and the browser that opens the link is not the one the mail was
+     sent from (ADR-0004).
    - `serve_order_item()` in `sales/views.py` is the single point a file is streamed from, and the
      only place a download writes to the database: it records the download **after** the file is
      open, so a refused link never counts. That is an `UPDATE` with `F()`, not a `save()`, so two
@@ -356,6 +365,11 @@ project directory here.
 Vue 3 + Pinia (with `pinia-plugin-persistedstate` for the cart), Vue Router, axios. Stores in
 `src/stores/`: `cart`, `catalog` (countries and document types), `content` (menu pages, site
 settings, slides), `order`, `settings` (the language only - the currency store is gone with USD).
+Every component under `src/components/` is now the storefront's own (`storefront/` plus the SVG
+icons): the Verdoc set - `ViewBlock`, `ListView`, `CommonButton`, `ModalWindow` and the rest - was
+deleted with M3, and no scss is left, so there is no sass toolchain either. Requests go through
+`src/api/`: `catalog.js`, `content.js` and `order.js` (checkout, cart lines, purchases,
+unsubscribe) - a view does not reach for the axios client itself.
 
 **Dynamic rendering ([ADR-0010](./docs/adr/0010-dynamic-rendering.md)).** The SPA is the whole
 interface for people; Django serves it as a shell (`storefront/shell.html`, built by `make spa`
@@ -372,11 +386,21 @@ decor/wave block from the design, and the dark strip must stay on every page (th
 **Verify in a browser before calling a storefront stage done** - green tests and `curl` do not
 catch a blank grid, a dead button or a layout that overflows at 320px. Run `make dev-backend`
 plus `make dev-frontend` (or `make spa` and the backend alone), then click through: catalog,
-filters, product page, add to cart, cart, both languages.
+filters, product page, add to cart, cart, checkout modal, both languages.
 
 The cart is a **set** of product payloads (no quantities - an order holds a product at most
 once); `stores/cart.js` persists it, the floating `cartlequebutton` from the design is
-`components/storefront/FloatingCart.vue`.
+`components/storefront/FloatingCart.vue`. `Cart.vue` calls `cart.refresh()` on open, which asks
+`GET /api/cart/items/?ids=` what those ids are now: localStorage may be months old, and the
+invoice is written from the catalog, so a product off the shelf leaves the cart here rather than
+failing at the checkout and a price that moved is corrected before the customer sees the total.
+
+**One component takes money: `components/storefront/BuyModal.vue`.** It is the cart's pay button
+and the "buy now" of every card and product page - the express path buys one template without
+touching the cart. The markup is the design's (`.remodal.modalpay`, `.modal-buy__*`,
+`.input-box*`), but remodal is not carried over, so Escape, the backdrop, the scroll lock and the
+focus are the component's own. It closes **only after the invoice exists**; a failure prints
+inside the modal (`errorMessageKey`), and the cart is cleared only on success.
 
 Two routes share the "my purchases" name and they are not the same page: `/purchases`
 (`views/MyPurchases.vue`) is the e-mail form you land on when the link is lost, `/purchases/:token`
