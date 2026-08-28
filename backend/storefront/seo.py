@@ -12,6 +12,7 @@ from django.conf import settings
 from django.http import HttpRequest
 from django.template.loader import render_to_string
 from django.urls import reverse, translate_url
+from django.utils.html import strip_tags
 from django.utils.safestring import mark_safe
 from django.utils.text import Truncator
 from django.utils.translation import gettext as _
@@ -62,12 +63,15 @@ def build_meta(
     }
 
 
-def catalog_meta(request: HttpRequest, country=None, doctype=None) -> dict:
+def catalog_meta(request: HttpRequest, country=None, doctype=None, home_page=None) -> dict:
     """Meta for the home page and the country/type listings."""
 
     selected = [obj for obj in (country, doctype) if obj is not None]
     if not selected:
-        return build_meta(request, title=site_name())
+        # The front page may carry its own meta on the `home` content.Page row.
+        title = (home_page.meta_title if home_page else "") or site_name()
+        description = home_page.meta_description if home_page else ""
+        return build_meta(request, title=title, description=description)
 
     # A single-facet page may carry its own meta from the admin; combined pages are generated.
     title = selected[0].meta_title if len(selected) == 1 and selected[0].meta_title else ""
@@ -135,6 +139,14 @@ def product_meta(request: HttpRequest, product) -> dict:
         og_image=images[0] if images else None,
         ld=ld,
     )
+
+
+def page_meta(request: HttpRequest, page) -> dict:
+    """Meta for an owner-written text page (content.Page)."""
+
+    title = page.meta_title or f"{page.title} | {site_name()}"
+    description = page.meta_description or Truncator(strip_tags(page.body)).words(30)
+    return build_meta(request, title=title, description=description)
 
 
 def service_meta(request: HttpRequest) -> dict:

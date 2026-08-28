@@ -17,8 +17,9 @@
             <div class="header__block">
                 <ul class="menu">
                     <li class="menu__item white link-primary"><a href="{% url 'storefront:home' %}">{% translate "Home" %}</a></li>
-                    <li class="menu__item white link-primary"><a href="#">{% translate "Rules" %}</a></li>
-                    <li class="menu__item white link-primary"><a href="#">{% translate "Contacts" %}</a></li>
+                    {% for nav_page in nav_pages %}
+                    <li class="menu__item white link-primary"><a href="{% url 'storefront:page' page_slug=nav_page.slug %}">{{ nav_page.title }}</a></li>
+                    {% endfor %}
                 </ul>
                 {% include "storefront/_lang_switch.html" %}
             </div>
@@ -31,6 +32,14 @@
         </div>
     </div>
 </header>
+
+{# The dark strip under the fixed header. Listing pages put the hero inside it (hero block); #}
+{# every other page keeps the bare strip so content clears the header, as in design/product.html. #}
+{% block hero %}
+<div class="bgs-header">
+    {% include "storefront/_bgs_decor.html" %}
+</div>
+{% endblock %}
 
 {% block content %}{% endblock %}
 
@@ -48,8 +57,9 @@
                 <div class="footer__menu">
                     <ul class="footer__list">
                         <li class="footer__item text black link-primary"><a href="{% url 'storefront:home' %}">{% translate "Home" %}</a></li>
-                        <li class="footer__item text black link-primary"><a href="#">{% translate "Contacts" %}</a></li>
-                        <li class="footer__item text black link-primary"><a href="#">{% translate "Rules" %}</a></li>
+                        {% for nav_page in nav_pages %}
+                        <li class="footer__item text black link-primary"><a href="{% url 'storefront:page' page_slug=nav_page.slug %}">{{ nav_page.title }}</a></li>
+                        {% endfor %}
                     </ul>
                 </div>
             </div>

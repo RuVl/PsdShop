@@ -12,6 +12,7 @@ from django.test import TestCase, override_settings
 
 from backend.testing import TempUploadsMixin
 from catalog.models import Country, DocumentType, Product
+from content.models import Page, Slide
 
 BOT_UA = "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)"
 
@@ -216,3 +217,44 @@ class ProductPageTests(TempUploadsMixin, TestCase):
         self.product.is_active = False
         self.product.save(update_fields=["is_active"])
         self.assertEqual(self.client.get(self.url, HTTP_USER_AGENT=BOT_UA).status_code, 404)
+
+
+class PageViewTests(TempUploadsMixin, TestCase):
+    """Owner-written pages on /<lang>/<slug>/: both presentations, unpublished is a 404."""
+
+    def setUp(self):
+        super().setUp()
+        Page.objects.create(slug="info", title_en="Rules", title_ru="Правила", body_en="<p>Store rules text</p>")
+        Page.objects.create(slug="hidden", title="Hidden", is_published=False)
+        Page.objects.create(slug=Page.HOME, title="Home", body_en="<p>home seo block</p>")
+
+    def test_bot_gets_rendered_page(self):
+        response = self.client.get("/en/info/", HTTP_USER_AGENT=BOT_UA)
+        self.assertContains(response, "Store rules text")
+        self.assertContains(response, "<title>Rules |")
+
+    def test_person_gets_shell_with_page_meta(self):
+        with shell_on_disk():
+            response = self.client.get("/en/info/", HTTP_USER_AGENT="Mozilla/5.0 (X11; Linux x86_64)")
+        self.assertContains(response, '<div id="app">')
+        self.assertContains(response, "<title>Rules |")
+
+    def test_unpublished_and_home_slugs_are_404(self):
+        self.assertEqual(self.client.get("/en/hidden/", HTTP_USER_AGENT=BOT_UA).status_code, 404)
+        self.assertEqual(self.client.get("/en/home/", HTTP_USER_AGENT=BOT_UA).status_code, 404)
+
+    def test_menu_links_point_at_pages(self):
+        response = self.client.get("/en/", HTTP_USER_AGENT=BOT_UA)
+        self.assertContains(response, 'href="/en/info/"')
+        self.assertNotContains(response, 'href="/en/hidden/"')
+
+    def test_home_renders_slides_and_seo_block(self):
+        Slide.objects.create(title_en="Welcome!", title_ru="Привет!", position=0)
+        response = self.client.get("/en/", HTTP_USER_AGENT=BOT_UA)
+        self.assertContains(response, "Welcome!")
+        self.assertContains(response, "home seo block")
+        # A filtered listing carries neither.
+        Country.objects.create(slug="germany", code="de", name_en="Germany", name_ru="Германия")
+        filtered = self.client.get("/en/germany/all/", HTTP_USER_AGENT=BOT_UA)
+        self.assertNotContains(filtered, "Welcome!")
+        self.assertNotContains(filtered, "home seo block")

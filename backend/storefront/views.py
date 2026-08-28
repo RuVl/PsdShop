@@ -15,6 +15,7 @@ from django.urls import reverse
 
 from catalog.models import Country, DocumentType, Product
 from catalog.views import PAGE_SIZE
+from content.models import Page, Slide
 from storefront import seo
 from storefront.bots import is_bot
 
@@ -45,7 +46,12 @@ def catalog(request, country=None, doctype=None):
     selected_country = get_object_or_404(Country, slug=country) if country and country != "all" else None
     selected_type = get_object_or_404(DocumentType, slug=doctype) if doctype and doctype != "all" else None
 
-    meta = seo.catalog_meta(request, selected_country, selected_type)
+    # The front page alone carries the welcome slider and the owner-written SEO block.
+    home_page = None
+    if not selected_country and not selected_type:
+        home_page = Page.objects.filter(is_published=True, slug=Page.HOME).first()
+
+    meta = seo.catalog_meta(request, selected_country, selected_type, home_page)
 
     if not is_bot(request) and _shell_available():
         return render_shell(request, meta)
@@ -71,8 +77,22 @@ def catalog(request, country=None, doctype=None):
         "document_types": DocumentType.objects.with_product_counts().filter(products_count__gt=0),
         "selected_country": selected_country,
         "selected_type": selected_type,
+        "home_page": home_page,
+        "slides": Slide.objects.visible() if home_page or (not selected_country and not selected_type) else None,
     }
     return render(request, "storefront/catalog.html", context)
+
+
+def page(request, page_slug=""):
+    """An owner-written text page (content.Page): /en/<slug>/."""
+
+    item = get_object_or_404(Page.objects.filter(is_published=True).exclude(slug=Page.HOME), slug=page_slug)
+
+    meta = seo.page_meta(request, item)
+    if not is_bot(request) and _shell_available():
+        return render_shell(request, meta)
+
+    return render(request, "storefront/page.html", {"storefront_meta": seo.render_meta(meta), "page": item})
 
 
 def product(request, country=None, doctype=None, product_slug=""):
