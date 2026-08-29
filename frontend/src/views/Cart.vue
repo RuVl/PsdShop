@@ -1,241 +1,213 @@
 <script setup>
-import {ref} from "vue";
-import {storeToRefs} from "pinia";
-import {useCartStore} from "@/stores/cart.js";
-import ViewBlock from "@/components/ViewBlock.vue";
-import ListView from "@/components/ListView.vue";
-import TrashIcon from "@/components/icons/IconTrash.vue";
-import CommonButton from "@/components/CommonButton.vue";
-import SelectPayment from "@/components/SelectPayment.vue";
-import {useLocalized} from "@/composables/localized.js";
+import {computed, onMounted, ref} from 'vue';
+import {useRoute} from 'vue-router';
+import {storeToRefs} from 'pinia';
+import BuyModal from '@/components/storefront/BuyModal.vue';
+import IconTrash from '@/components/icons/IconTrash.vue';
+import {useCartStore} from '@/stores/cart.js';
+import {useLocalized} from '@/composables/localized.js';
 
-// A cart line is a catalog API payload: no quantities (a template is one order line, ADR-0001),
-// prices in USD only. The checkout flow itself is reworked in M3.
+// The cart itself lives in localStorage (ADR-0010) - this page is its view, drawn with the
+// design's storefront classes. A line is a catalog card payload: no quantities, USD only.
+const route = useRoute();
 const cartStore = useCartStore();
 const {cartItems, cartItemCount, totalPrice} = storeToRefs(cartStore);
 const localized = useLocalized();
 
-const is_opened = ref(false);
+const lang = computed(() => route.params.lang || 'en');
+
+const state = ref('loading');
+const dropped = ref(0);
+const paying = ref(false);
+
+// What the browser remembers can be months old, and the invoice is written from the catalog: a
+// product taken off the shelf leaves the cart here rather than failing at the checkout, and a
+// price that moved is corrected before the customer sees the total.
+onMounted(async () => {
+    const before = cartItemCount.value;
+    try {
+        await cartStore.refresh();
+        dropped.value = before - cartItemCount.value;
+        state.value = 'ready';
+    } catch {
+        state.value = 'failed';
+    }
+});
 </script>
 
 <template>
-  <ViewBlock class="cart-view">
-    <template #title>{{ $t('routes.cart') }}</template>
-    <div v-if="cartItemCount === 0" class="empty-cart">
-      {{ $t('cart_view.empty') }}
-    </div>
-    <div v-else>
-      <ListView v-slot="{element: item}" :elements="cartItems" class="cart-item">
-        <div class="item-head">
-          <img v-if="item.preview?.card" :src="item.preview.card" :alt="localized(item)" class="item-preview">
-          <span class="product-name">{{ localized(item) }}</span>
+  <main class="main-content">
+    <section class="shop mb-100">
+      <div class="container">
+        <h1 class="title-section black">{{ $t('cart_view.title') }}</h1>
+
+        <p v-if="state === 'loading'" class="text black">{{ $t('cart_view.loading') }}</p>
+        <p v-else-if="state === 'failed'" class="text black">{{ $t('cart_view.error') }}</p>
+
+        <template v-else-if="cartItemCount">
+          <p v-if="dropped" class="text-small cart__notice">{{ $t('cart_view.dropped') }}</p>
+
+          <ul class="cart__list list-reset">
+            <li v-for="item in cartItems" :key="item.id" class="cart__item">
+              <router-link class="cart__preview"
+                           :to="{name: 'product', params: {lang, country: item.country, type: item.document_type, productSlug: item.url_slug}}">
+                <img v-if="item.preview?.card" :src="item.preview.card" :alt="localized(item)">
+              </router-link>
+
+              <div class="cart__body">
+                <router-link class="cart__title text black"
+                             :to="{name: 'product', params: {lang, country: item.country, type: item.document_type, productSlug: item.url_slug}}">
+                  {{ localized(item) }}
+                </router-link>
+                <div class="cart__price text-small">
+                  {{ $t('cart_view.cost') }}: <span class="primary">${{ Number(item.price).toFixed(2) }}</span>
+                </div>
+              </div>
+
+              <button class="cart__remove" type="button" :title="$t('buttons.delete')"
+                      @click="cartStore.removeItem(item.id)">
+                <IconTrash/>
+              </button>
+            </li>
+          </ul>
+
+          <div class="cart__footer">
+            <div class="cart__total text-mid black">
+              {{ $t('cart_view.total') }}: <span class="primary">${{ totalPrice.toFixed(2) }}</span>
+            </div>
+            <button class="button" type="button" @click="paying = true">{{ $t('buttons.pay') }}</button>
+          </div>
+        </template>
+
+        <div v-else class="cart__empty">
+          <p class="text black">{{ $t('cart_view.empty') }}</p>
+          <router-link class="button" :to="{name: 'home', params: {lang}}">{{ $t('buttons.to_catalog') }}</router-link>
         </div>
-        <div class="cost-block">
-          <span class="cost-label short">{{ $t('cart_view.cost') }}:</span>
-          <span class="cost-label full">{{ $t('cart_view.cost_full') }}:</span>
-          <span class="product-cost">${{ Number(item.price).toFixed(2) }}</span>
-        </div>
-        <button class="remove-btn" @click="cartStore.removeItem(item.id)">
-          <span class="remove-label">{{ $t('buttons.delete') }}</span>
-          <TrashIcon/>
-        </button>
-      </ListView>
-      <hr>
-      <div class="total-price-block">
-        <div>
-          <span>{{ $t('cart_view.total') }}:</span>
-          <span class="total-price">${{ totalPrice.toFixed(2) }}</span>
-        </div>
-        <CommonButton tabindex="0" @click="is_opened=true">
-          {{ $t('buttons.payment_method') }}
-        </CommonButton>
-        <SelectPayment v-model:is_opened="is_opened"/>
       </div>
-    </div>
-  </ViewBlock>
+    </section>
+
+    <BuyModal v-model:open="paying"/>
+  </main>
 </template>
 
-<style lang="scss" scoped>
-.cart-view {
-  padding-bottom: 25px;
-
-  .empty-cart {
-    text-align: center;
-    padding: 75px 0;
-    margin-bottom: 25px;
-    font-weight: 500;
-    font-size: 16px;
-  }
-
-  .cart-item {
-    .item-preview {
-      width: 52px;
-      border-radius: 6px;
-      object-fit: cover;
-    }
-
-    // flag + name stay grouped on one line; on desktop the group fills the free space
-    .item-head {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      flex: 1;
-      min-width: 0;
-    }
-
-    .product-name {
-      flex: 1;
-      min-width: 0;
-      // robustly override the `text-wrap: nowrap` inherited from ListView's li;
-      // white-space is universally supported, unlike `text-wrap: pretty` alone
-      white-space: normal;
-      overflow-wrap: anywhere;
-      text-wrap: pretty; // progressive enhancement for nicer line breaks
-    }
-
-    .product-cost {
-      display: inline-block;
-      text-align: center;
-      min-width: 100px;
-      padding: 10px 0;
-      background-color: var(--second-color);
-      border-radius: 10px;
-    }
-
-    .cost-block {
-      & > span {
-        margin: 0 10px;
-      }
-
-      .cost-label.full {
-        display: none; // full label is shown only on the mobile card
-      }
-    }
-
-    .remove-btn {
-      border: 0;
-      background-color: var(--red-color);
-      border-radius: 5px;
-      cursor: pointer;
-      height: 27px;
-      min-width: 27px;
-      line-height: 0;
-
-      .remove-label {
-        display: none; // text label is shown only on the mobile card
-      }
-
-      &:hover {
-        opacity: .7;
-      }
-
-      svg {
-        display: inline-block;
-        place-content: center;
-        color: #ffffff;
-        width: 20px;
-        height: 20px;
-      }
-    }
-  }
-
-  hr {
-    margin: 65px 0 15px;
-    border: 0;
-    border-top: 1px solid var(--second-color);
-  }
-
-  .total-price-block {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    font-size: 14px;
-
-    > div {
-      display: flex;
-      gap: 15px;
-      flex-direction: column;
-      font-size: 12px;
-      font-weight: 500;
-    }
-
-    .total-price {
-      font-size: 24px;
-      font-weight: 600;
-    }
-  }
+<style scoped>
+.cart__notice {
+  margin: 0 0 20px;
+  color: #f6294b;
 }
 
-@media screen and (max-width: 768px) {
-  .cart-view {
-    // stack the row into a centered card; dashed divider between items
-    :deep(.products-list > ul > li) {
-      flex-direction: column;
-      align-items: center;
-      text-align: center;
-      gap: 12px;
-      padding: 20px 0;
-      border-bottom: 1px dashed var(--second-color);
-    }
+.cart__list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 25px 0 0;
+  padding: 0;
+}
 
-    .cart-item {
-      .item-head {
-        flex: 0 0 auto;
-        justify-content: center;
-        max-width: 100%;
-      }
+/* The card of the mockup's basket row: white, soft shadow, 15px radius. */
+.cart__item {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  padding: 15px 23px;
+  background: #fff;
+  border-radius: 15px;
+  box-shadow: 0 0 81px 0 rgba(0, 0, 0, .1);
+}
 
-      .cost-block {
-        display: flex;
-        align-items: center;
-        justify-content: center;
+.cart__preview {
+  flex: 0 0 auto;
+  width: 72px;
+  line-height: 0;
+}
 
-        .cost-label.short {
-          display: none;
-        }
+.cart__preview img {
+  width: 100%;
+  border-radius: 10px;
+}
 
-        .cost-label.full {
-          display: inline;
-        }
-      }
+.cart__body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
 
-      // plain bold price, no chip - matches the mockup
-      .product-cost {
-        min-width: 0;
-        padding: 0;
-        background: none;
-        font-weight: 700;
-      }
+.cart__title {
+  color: #2c2045;
+  overflow-wrap: anywhere;
+  transition: color .3s ease;
+}
 
-      .remove-btn {
-        display: inline-flex;
-        align-items: center;
-        gap: 8px;
-        width: auto;
-        height: auto;
-        padding: 8px 18px;
-        color: #ffffff;
-        font-weight: 600;
-        line-height: 1;
+.cart__title:hover {
+  color: #6238f0;
+}
 
-        .remove-label {
-          display: inline;
-        }
-      }
-    }
+.cart__price .primary {
+  font-weight: 600;
+}
 
-    // stack the pay button under the sum so they never collide on narrow screens
-    .total-price-block {
-      flex-direction: column;
-      align-items: stretch;
-      gap: 20px;
+.cart__remove {
+  flex: 0 0 auto;
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  color: #fff;
+  background: #f6294b;
+  border: 0;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: opacity .3s ease;
+}
 
-      > div {
-        flex-direction: row;
-        align-items: baseline;
-        justify-content: space-between;
-      }
-    }
+.cart__remove:hover {
+  opacity: .7;
+}
+
+.cart__remove svg {
+  width: 18px;
+  height: 18px;
+}
+
+.cart__footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 20px;
+  margin-top: 30px;
+}
+
+.cart__total .primary {
+  font-weight: 600;
+}
+
+.cart__empty {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 20px;
+  margin-top: 25px;
+}
+
+@media (max-width: 560px) {
+  .cart__item {
+    flex-wrap: wrap;
+    gap: 15px;
+    padding: 15px;
+  }
+
+  .cart__footer {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .cart__footer .button {
+    width: 100%;
   }
 }
 </style>

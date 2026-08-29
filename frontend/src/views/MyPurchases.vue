@@ -1,80 +1,78 @@
 <script setup>
-import {reactive, ref} from "vue";
-import apiClient from "@/api/index.js";
-import {useSettingsStore} from "@/stores/settings";
-import {errorMessageKey} from "@/api/errors.js";
-import ViewBlock from "@/components/ViewBlock.vue";
-import CommonButton from "@/components/CommonButton.vue";
-import PrettyInput from "@/components/PrettyInput.vue";
+import {ref} from 'vue';
+import {sendPurchasesLinks} from '@/api/order.js';
+import {useSettingsStore} from '@/stores/settings.js';
+import {errorMessageKey} from '@/api/errors.js';
 
-const purchases_form = reactive({
-  email: ''
-});
-
-const error = ref(null);
+// The page you land on when the link from the e-mail is lost: it tops up anything undelivered,
+// revokes the old purchases link and mails a fresh one (ADR-0002).
+const email = ref('');
 const sending = ref(false);
+const error = ref(null);
+const sentTo = ref('');
 
-async function sendLinks() {
-  error.value = null;
-  sending.value = true;
-  try {
-    const response = await apiClient.post('/send-links/', {
-      email: purchases_form.email,
-      language: useSettingsStore().currentLanguage,
-    });
-
-    if (response.status === 200)
-      window.location.href = '/';
-  } catch (e) {
-    // 404 is "no paid orders on this address" and 502 is "the mail did not go out" - the customer
-    // has to do something different in each case, so they must not look the same.
-    error.value = errorMessageKey(e, {
-      404: 'purchases.email.error.not_found',
-      502: 'purchases.email.error.mail_failed',
-    });
-    console.error('Cannot send the purchases link:', e);
-  } finally {
-    sending.value = false;
-  }
+async function submit() {
+    error.value = null;
+    sending.value = true;
+    try {
+        await sendPurchasesLinks({email: email.value, language: useSettingsStore().currentLanguage});
+        // Said here rather than by a redirect: the customer has to go to their inbox next, and a
+        // bounce back to the catalog reads as if nothing happened.
+        sentTo.value = email.value;
+    } catch (e) {
+        // 404 is "no paid orders on this address" and 502 is "the mail did not go out" - the
+        // customer has to do something different in each case.
+        error.value = errorMessageKey(e, {
+            404: 'purchases.email.error.not_found',
+            502: 'purchases.email.error.mail_failed',
+        });
+        console.error('Cannot send the purchases link:', e);
+    } finally {
+        sending.value = false;
+    }
 }
 </script>
 
 <template>
-  <ViewBlock>
-    <template #title>{{ $t('routes.my_purchases') }}</template>
-    <form class="get-files-form" method="post" @submit.prevent="sendLinks">
-      <span>{{ $t('purchases.email.ask') }}:</span>
-      <pretty-input v-model="purchases_form.email" :placeholder="$t('purchases.email.placeholder')" name="email"
-                    type="email"/>
-      <p v-if="error" class="form-error">{{ $t(error) }}</p>
-      <common-button :disabled="sending" tabindex="0">{{ $t('buttons.send_links') }}</common-button>
-    </form>
-  </ViewBlock>
+  <main class="main-content">
+    <section class="shop mb-100">
+      <div class="container">
+        <h1 class="title-section black">{{ $t('routes.my_purchases') }}</h1>
+
+        <p v-if="sentTo" class="text black">{{ $t('purchases.email.sent', {email: sentTo}) }}</p>
+
+        <form v-else class="purchases-form" @submit.prevent="submit">
+          <div class="input-box">
+            <label class="input-box-label" for="purchases-email">{{ $t('purchases.email.ask') }}</label>
+            <input id="purchases-email" v-model="email" class="input-box-input" type="email" name="email"
+                   required autocomplete="email" :placeholder="$t('purchases.email.placeholder')">
+          </div>
+
+          <p v-if="error" class="text-small purchases-form__error">{{ $t(error) }}</p>
+
+          <button class="button" type="submit" :disabled="sending">{{ $t('buttons.send_links') }}</button>
+        </form>
+      </div>
+    </section>
+  </main>
 </template>
 
-<style lang="scss" scoped>
-.get-files-form {
+<style scoped>
+.purchases-form {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  gap: 15px;
-  font-size: 16px;
-
-  .form-error {
-    color: var(--red-color);
-    margin: 0;
-  }
+  gap: 20px;
+  max-width: 480px;
+  margin-top: 25px;
 }
 
-@media screen and (max-width: 480px) {
-  .get-files-form {
-    align-items: center;
-    gap: 15px;
-    font-size: 14px;
+.purchases-form .input-box {
+  width: 100%;
+}
 
-    > span {
-      text-align: center;
-    }
-  }
+.purchases-form__error {
+  margin: 0;
+  color: #f6294b;
 }
 </style>

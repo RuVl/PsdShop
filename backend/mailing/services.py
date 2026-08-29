@@ -2,6 +2,7 @@ from django.conf import settings
 from django.core import signing
 from django.core.mail import EmailMultiAlternatives, get_connection
 from django.http import HttpRequest
+from django.urls import reverse
 from django.utils import translation
 from django.utils.html import strip_tags
 from django.utils.translation import gettext as _
@@ -12,9 +13,6 @@ from customer.models import Customer
 from .models import Broadcast
 
 UNSUBSCRIBE_SALT = "broadcast-unsubscribe"
-
-# Frontend route, not a Django one - keep it in step with the Vue router (`/unsubscribe/:token`).
-UNSUBSCRIBE_PATH = "/unsubscribe/{token}?lang={language}"
 
 
 def make_unsubscribe_token(email: str) -> str:
@@ -30,11 +28,12 @@ def make_unsubscribe_url(customer: Customer, request: HttpRequest | None = None)
     """
     Absolute link to the unsubscribe page.
 
-    The language rides along in the query string because the page is opened from an inbox, with
-    no idea of what the customer picked on the site - the router reads `?lang=` on every route.
+    The language is the path prefix (`i18n_patterns`, ADR-0010) and comes from the Customer: the
+    page is opened from an inbox, with no idea of what the customer picked on the site.
     """
 
-    path = UNSUBSCRIBE_PATH.format(token=make_unsubscribe_token(customer.email), language=customer.language)
+    with translation.override(customer.language):
+        path = reverse("storefront:unsubscribe", kwargs={"token": make_unsubscribe_token(customer.email)})
 
     return absolute_url(path, request)
 

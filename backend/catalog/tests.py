@@ -1,8 +1,10 @@
 from decimal import Decimal
-from io import BytesIO
+from io import BytesIO, StringIO
 
 from django.core.exceptions import ValidationError
 from django.core.files.base import ContentFile
+from django.core.management import call_command
+from django.core.management.base import CommandError
 from django.db.models import ProtectedError
 from django.test import TestCase
 
@@ -258,6 +260,19 @@ class ProductDeletionTests(CatalogFactoryMixin, TestCase):
         product.delete()
 
         self.assertFalse(Product.objects.filter(pk=product.pk).exists())
+
+    def test_seeding_over_a_sold_catalog_explains_itself(self):
+        """`seed_testdata --flush` runs into the same PROTECT - it has to say so, not traceback."""
+
+        product = self.make_product()
+        customer = Customer.objects.create(email="buyer@example.com")
+        order = Order.objects.create(customer=customer, total_price=product.price)
+        OrderItem.objects.create(order=order, product=product, product_name=product.name, unit_price=product.price)
+
+        with self.assertRaises(CommandError) as caught:
+            call_command("seed_testdata", "--flush", "--images", "0", stdout=StringIO())
+
+        self.assertIn(str(order.pk), str(caught.exception))
 
     def test_taking_a_product_off_the_shelf_is_a_flag(self):
         product = self.make_product()
