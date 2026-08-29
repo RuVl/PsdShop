@@ -475,6 +475,22 @@ class CheckoutTests(SalesFactoryMixin, TestCase):
         self.assertEqual(response.status_code, 502)
         self.assertFalse(Order.objects.filter(customer__email="new@example.com").exists())
 
+    def test_a_network_error_never_writes_the_api_key_into_the_log(self):
+        # requests puts the whole request URL in its exception message, and the key travels in it.
+        leak = requests.ConnectionError(
+            f"HTTPSConnectionPool: /api/v1/invoices/new?api_key={settings.PLISIO_SECRET_KEY}&order_number=1"
+        )
+
+        with (
+            patch("sales.views.requests.get", side_effect=leak),
+            self.assertLogs("sales.views", level="ERROR") as logs,
+        ):
+            response = self.checkout()
+
+        self.assertEqual(response.status_code, 502)
+        self.assertNotIn(settings.PLISIO_SECRET_KEY, "\n".join(logs.output))
+        self.assertIn("***", "\n".join(logs.output))
+
     def test_checkout_remembers_the_site_language(self):
         with patch("sales.views.requests.get", return_value=self.plisio_ok()):
             self.checkout(language="ru")

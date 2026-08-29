@@ -35,6 +35,12 @@ PLISIO_LANGUAGES = {
 }
 
 
+def redact(value) -> str:
+    """Message with the Plisio API key blanked out - it rides in the request URL requests echoes."""
+
+    return str(value).replace(settings.PLISIO_SECRET_KEY, "***")
+
+
 class OrderCreateView(APIView):
     """Create a new order endpoint"""
 
@@ -72,9 +78,10 @@ class OrderCreateView(APIView):
             payload = response.json()
         except ValueError as e:
             # Includes requests' JSONDecodeError - the call went through, the body is not JSON.
-            logger.error(f"Plisio answered order {order.id} with something that is not JSON: {e}")
+            logger.error(f"Plisio answered order {order.id} with something that is not JSON: {redact(e)}")
         except requests.RequestException as e:
-            logger.error(f"Plisio is unreachable for order {order.id}: {e}")
+            # requests puts the request URL in the message, and the API key travels in it.
+            logger.error(f"Plisio is unreachable for order {order.id}: {redact(e)}")
 
         if response is not None and response.status_code == 200 and payload.get("status") == "success":
             logger.info(f"Order {order.id} created successfully")
@@ -117,7 +124,9 @@ class PlisioCallbackView(APIView):
             settings.PLISIO_SECRET_KEY.encode("utf-8"), ordered_data.encode("utf-8"), hashlib.sha1
         ).hexdigest()
 
-        return calculated_hash == received_hash
+        # Constant-time: a plain == leaks how many leading bytes matched, and the attacker
+        # controls the value being compared.
+        return hmac.compare_digest(calculated_hash, received_hash or "")
 
     def post(self, request, *args, **kwargs):
         data = request.data.copy()
