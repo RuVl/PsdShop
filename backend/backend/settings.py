@@ -108,6 +108,18 @@ MAX_ORDER_ITEMS = 25
 # customer/validators.py - turn it off only if outbound DNS is blocked.
 VALIDATE_EMAIL_MX = env.bool("VALIDATE_EMAIL_MX", default=True)
 
+# The API answers a storefront, not a person: JSON only. DRF's browsable renderer is a writable
+# HTML form on every endpoint, so it stays a development convenience.
+REST_FRAMEWORK = {
+    "DEFAULT_RENDERER_CLASSES": ["rest_framework.renderers.JSONRenderer"],
+}
+
+if DEBUG:
+    REST_FRAMEWORK["DEFAULT_RENDERER_CLASSES"] = [
+        "rest_framework.renderers.JSONRenderer",
+        "rest_framework.renderers.BrowsableAPIRenderer",
+    ]
+
 LOGGING = {
     "version": 1,
     "disable_existing_loggers": False,
