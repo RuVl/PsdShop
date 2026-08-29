@@ -407,7 +407,7 @@ pages on the same URLs. vue-router mirrors `backend/backend/urlspace.py`; keep t
 when a route is added. Data comes from `/api/catalog/...` (`src/api/catalog.js`) and
 `/api/content/...` (`src/api/content.js`), and both presentations must stay content-equivalent -
 a change lands in the bot template and the Vue view together. Two pieces of markup are literally
-shared: `storefront/_bgs_decor.html` and `components/storefront/HeroHeader.vue` carry the same
+shared: `storefront/_bgs_decor.html` and `components/storefront/PageDecor.vue` carry the same
 decor/wave block from the design, and the dark strip must stay on every page (the header is
 `position: fixed`, so without it the content slides underneath).
 
@@ -422,19 +422,43 @@ string `seo.x_default` puts in `<head>`, so the two presentations advertise one 
 rendered by Django so its `Sitemap:` line is built from `django_site` + `SITE_SCHEME` like every
 other absolute link.
 
+**The grid pages in both directions.** `Catalog.vue` holds a range of pages, not one: arriving at
+`?page=5` loads that page and offers "load previous" above the grid, and both that block and the
+one below it are IntersectionObserver targets - scrolling either way keeps loading, the buttons are
+the fallback for when the observer does not fire. Prepending restores the scroll position, and a
+`?page=` past the end lands on the last real page instead of "page not found" (the API answers 404
+both for an overshoot and for an unknown slug; asking for page 1 tells the two apart). The URL
+keeps the last loaded page, so a bot on the same address sees the same set. The product search is
+client-side over what is loaded, like the design's `app.js`, but it lives in `?q=` so a reload or a
+shared link keeps it.
+
+**The header is `position: fixed` over a light page**, so `App.vue` ports the design's scroll
+handler: `header-scrolled` paints it black past the first pixel and `out` slides it away while the
+reader moves down (never while the mobile menu is open). Without those classes it dissolves into
+the content.
+
 **Verify in a browser before calling a storefront stage done** - green tests and `curl` do not
 catch a blank grid, a dead button or a layout that overflows at 320px. Run `make dev-backend`
 plus `make dev-frontend` (or `make spa` and the backend alone), then click through: catalog,
 filters, product page, add to cart, cart, checkout modal, both languages.
 
-The cart is a **set** of product payloads (no quantities - an order holds a product at most
+**Everything the API hands over is a model, not a payload** (`src/models/`). `Localized` turns the
+`name_en`/`name_ru` pairs every endpoint carries into one property read against the active locale
+with an English fallback - the rule modeltranslation applies on the server - and `Product`,
+`Country`, `DocumentType`, `Page`, `Slide`, `SiteSettings` extend it. `Product` also owns the two
+things that used to be copied around: `priceLabel` (USD, two decimals) and `route(lang)`. The api
+modules construct them, so a view never sees raw JSON. One catch: `localStorage` holds JSON, so
+`stores/cart.js` rebuilds its lines with `new Product(...)` in the persist plugin's `afterHydrate`
+- without it `item.name` is undefined until the first `refresh()`.
+
+The cart is a **set** of products (no quantities - an order holds a product at most
 once); `stores/cart.js` persists it, the floating `cartlequebutton` from the design is
-`components/storefront/FloatingCart.vue`. `Cart.vue` calls `cart.refresh()` on open, which asks
+`components/storefront/CartButton.vue`. `Cart.vue` calls `cart.refresh()` on open, which asks
 `GET /api/cart/items/?ids=` what those ids are now: localStorage may be months old, and the
 invoice is written from the catalog, so a product off the shelf leaves the cart here rather than
 failing at the checkout and a price that moved is corrected before the customer sees the total.
 
-**One component takes money: `components/storefront/BuyModal.vue`.** It is the cart's pay button
+**One component takes money: `components/storefront/CheckoutModal.vue`.** It is the cart's pay button
 and the "buy now" of every card and product page - the express path buys one template without
 touching the cart. The markup is the design's (`.remodal.modalpay`, `.modal-buy__*`,
 `.input-box*`), but remodal is not carried over, so Escape, the backdrop, the scroll lock and the
@@ -467,8 +491,10 @@ The design is a static build in **`design/`** (`index.html`, `product.html`, `st
 `backend/storefront/static/storefront/css/` and dresses both presentations, so a Vue component
 reuses the design's class names rather than inventing its own. The jQuery plugins it ships with
 (`remodal`, `swiper-bundle`, jQuery itself) are **not** carried over: the modal is our own
-component, the welcome slider is `components/storefront/WelcomeSlider.vue` (~50 lines, the design's
-arrow styles), and the filters/burger/search in `app.js` are reactive state. `glightbox` stays, as
+component, the welcome slider is `components/storefront/SlidesCarousel.vue` (the design's arrow
+styles, but the positioning, the chevron and the dots are the component's own - `style.css` only
+dresses arrows swiper had already placed), and the filters/burger/search in `app.js` are reactive
+state. `glightbox` stays, as
 an npm package, for the product gallery.
 `design/Инструкция по обновлению.txt` documents the year badge and the filter block the designer
 added last - follow it when the markup differs from an older screenshot.
