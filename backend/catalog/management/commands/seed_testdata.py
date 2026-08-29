@@ -211,8 +211,12 @@ class Command(BaseCommand):
         from PIL import Image, ImageDraw
 
         palette = [(33, 54, 255), (217, 15, 43)]
-        canvas = Image.new("RGB", (640, 420), palette[position % len(palette)])
-        ImageDraw.Draw(canvas).ellipse((140, 60, 500, 360), fill=(255, 255, 255))
+        # Two shapes on purpose: a slide holds whatever the owner uploads, and the block must not
+        # depend on it being wide.
+        sizes = [(640, 420), (900, 500)]
+        width, height = sizes[position % len(sizes)]
+        canvas = Image.new("RGB", (width, height), palette[position % len(palette)])
+        ImageDraw.Draw(canvas).ellipse((width * 0.2, height * 0.15, width * 0.8, height * 0.85), fill=(255, 255, 255))
         buffer = BytesIO()
         canvas.save(buffer, format="PNG")
         return ContentFile(buffer.getvalue(), name=f"slide-{position + 1}.png")
@@ -300,11 +304,26 @@ class Command(BaseCommand):
         from PIL import Image, ImageDraw
 
         palette = [(232, 240, 254), (255, 244, 229), (233, 247, 239)]
+        # Real uploads are not one shape: a scan is a portrait A4, a photo is landscape, and
+        # somebody always uploads a square or something tiny. The card crops with object-fit, so
+        # the seed has to hand it every one of those to be worth testing against.
+        shapes = [
+            ("landscape", 1400, 990),
+            ("a4-portrait", 900, 1273),
+            ("square", 1000, 1000),
+            ("panorama", 1600, 640),
+            ("small", 300, 200),
+        ]
+        # Offset by the product id, so neighbouring cards in the grid differ.
+        offset = product.pk or 0
         for position in range(count):
-            canvas = Image.new("RGB", (1400, 990), palette[position % len(palette)])
+            shape, width, height = shapes[(offset + position) % len(shapes)]
+            canvas = Image.new("RGB", (width, height), palette[position % len(palette)])
             draw = ImageDraw.Draw(canvas)
-            draw.rectangle((40, 40, 1360, 950), outline=(120, 130, 150), width=6)
-            draw.text((80, 90), f"{product.name_en}\npage {position + 1}", fill=(40, 50, 70))
+            inset = max(4, min(width, height) // 30)
+            border = (inset, inset, width - inset, height - inset)
+            draw.rectangle(border, outline=(120, 130, 150), width=inset // 4 or 1)
+            draw.text((inset * 2, inset * 2), f"{product.name_en}\n{shape} {width}x{height}", fill=(40, 50, 70))
 
             buffer = BytesIO()
             canvas.save(buffer, format="PNG")
