@@ -9,8 +9,11 @@ import {useSettingsStore} from "@/stores/settings.js";
 
 const app = createApp(App);
 
-app.use(router);
+// Pinia first: vue-router starts the initial navigation from its own install(), and the
+// root redirect reads the language out of a store - with the router registered first that
+// resolution runs before there is an active pinia.
 app.use(pinia);
+app.use(router);
 
 const settingsStore = useSettingsStore();
 const i18n = await setupI18n({locale: settingsStore.currentLanguage});
