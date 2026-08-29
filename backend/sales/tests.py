@@ -180,6 +180,35 @@ class PlisioCallbackTests(SalesFactoryMixin, TestCase):
     def post_callback(self, **overrides):
         return self.client.post(self.url, sign_plisio_payload({**self.payload, **overrides}), format="json")
 
+    def test_the_hash_is_checked_the_way_plisio_builds_it(self):
+        # Plisio (and its own SDK) hashes the JSON body in the order it sent it, with non-ASCII
+        # escaped - it does not sort the keys. Signing with our own helper cannot catch a
+        # disagreement about that, so this payload is signed the SDK's way, keys deliberately out
+        # of alphabetical order.
+        payload = {
+            "txn_id": "txn-sdk",
+            "order_number": str(self.order.id),
+            "status": "completed",
+            "amount": "0.0005",
+            "currency": "BTC",
+            "order_name": "Заказ №1",
+        }
+        body = json.dumps(payload, separators=(",", ":"))
+        payload["verify_hash"] = hmac.new(settings.PLISIO_SECRET_KEY.encode(), body.encode(), hashlib.sha1).hexdigest()
+
+        response = self.client.post(self.url, payload, format="json")
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.order.refresh_from_db()
+        self.assertIsNotNone(self.order.paid_at)
+
+    def test_a_sorted_hash_is_accepted_too(self):
+        # Whether Plisio hands the keys over sorted is not something we get to know for sure, so
+        # both readings of the same payload are accepted - each is an HMAC with our own key.
+        response = self.post_callback(txn_id="txn-sorted")
+
+        self.assertEqual(response.status_code, 200, response.data)
+
     def test_a_form_encoded_callback_is_accepted(self):
         # This is the shape Plisio actually posts. A QueryDict hands back lists, not strings, so
         # a callback read straight off request.data never matched its own hash - and every JSON
@@ -510,6 +539,16 @@ class CheckoutTests(SalesFactoryMixin, TestCase):
             self.checkout(language="ru")
 
         self.assertEqual(Customer.objects.get(email="new@example.com").language, "ru")
+
+    def test_the_invoice_carries_the_callback_url_with_json_true(self):
+        # Without ?json=true Plisio posts a form signed with PHP's serialize(), which our
+        # verification cannot reproduce - every payment would be refused at the callback.
+        with patch("sales.views.requests.get", return_value=self.plisio_ok()) as request:
+            self.checkout()
+
+        url = request.call_args.kwargs["params"]["callback_url"]
+        self.assertTrue(url.endswith("/api/order/status?json=true"), url)
+        self.assertTrue(url.startswith("http"), url)
 
     def test_the_invoice_is_opened_in_the_customers_language(self):
         with patch("sales.views.requests.get", return_value=self.plisio_ok()) as request:

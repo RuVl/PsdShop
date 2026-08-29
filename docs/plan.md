@@ -290,5 +290,6 @@ curl -sI localhost:8000/ | grep -i location                                    #
 Порядок, в котором это делается на сервере: домен и сертификаты в `frontend/nginx/ssl/` →
 заполненные `.env` (`DOMAIN`, `ALLOWED_HOSTS`, `CORS`/`CSRF`, `PLISIO_SECRET_KEY`, `EMAIL_URL`) →
 `make up` → `make migrate` → `make superuser` → строка `django_site` под реальный домен →
-webhook Plisio на `https://<домен>/api/order/status` → DKIM (профиль `mail`, ключ в `secrets/`) →
+webhook Plisio (в кабинете он не обязателен: `callback_url` с `?json=true` уходит с каждым
+инвойсом; если всё же прописывать — `https://<домен>/api/order/status?json=true`) → DKIM (профиль `mail`, ключ в `secrets/`) →
 проверка `make nginx-check`, `/sitemap.xml`, `/robots.txt` и бэкапов (крон в контейнере postgres).

@@ -178,8 +178,14 @@ payment, delivery), `mailing` (broadcasts).
    URL is stored on `Order.invoice_url`, and if the request fails the order is deleted - the
    endpoint answers **502** with `{detail, code: "invoice_failed", provider_code}`, passing Plisio's
    own message on instead of a blanket "Error creating invoice".
-3. **Payment callback** - `POST /api/order/status` (`PlisioCallbackView`). Verifies `verify_hash`
-   (HMAC-SHA1) against `PLISIO_SECRET_KEY`, stores the raw payload in `PaymentCallbackLog`
+3. **Payment callback** - `POST /api/order/status` (`PlisioCallbackView`). **The invoice request
+   sends its own `callback_url`, ending in `?json=true`** (`sales/views.py: callback_url()`): that
+   parameter is what makes Plisio post JSON and sign the JSON body. Without it Plisio posts a form
+   and signs PHP's `serialize()` of the sorted array - a different algorithm, so every payment
+   would be refused at the door. Never drop it, and do not rely on the dashboard setting instead.
+   The view verifies `verify_hash` (HMAC-SHA1 over the body, both as received and key-sorted -
+   Plisio's own SDK does not sort, and each candidate is an HMAC with our key) against
+   `PLISIO_SECRET_KEY`, stores the raw payload in `PaymentCallbackLog`
    **before** the atomic block, then upserts the `Transaction` **by `txn_id`** (a currency switch
    mints a new invoice for the same order). On PAID/OVERPAID: `order.mark_paid()` stamps `paid_at`
    once and only that first call sends the e-mail; `order.deliver()` hands the files over. On

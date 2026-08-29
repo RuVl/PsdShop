@@ -9,10 +9,12 @@ from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.http import FileResponse, HttpResponseNotFound
+from django.urls import reverse
 from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from backend.sites import absolute_url
 from catalog.models import Product
 from catalog.serializers import ProductListSerializer
 from customer.models import Customer
@@ -33,6 +35,12 @@ PLISIO_LANGUAGES = {
     "en": "en_US",
     "ru": "ru_RU",
 }
+
+
+def callback_url(request) -> str:
+    """Where Plisio reports this invoice, with the parameter that decides how it signs the report."""
+
+    return absolute_url(reverse("plisio-callback"), request) + "?json=true"
 
 
 def redact(value) -> str:
@@ -70,6 +78,10 @@ class OrderCreateView(APIView):
             "api_key": settings.PLISIO_SECRET_KEY,
             "language": PLISIO_LANGUAGES.get(order.customer.language, "en_US"),
             "expire_min": "60",
+            # `?json=true` is what makes Plisio post JSON and sign it the way validate_hash checks;
+            # without it the callback arrives form-encoded, signed with PHP's serialize(), and no
+            # payment would ever be accepted. Sent per invoice so it cannot be lost in a dashboard.
+            "callback_url": callback_url(request),
         }
 
         response, payload = None, {}
@@ -117,16 +129,34 @@ class PlisioCallbackView(APIView):
 
     @staticmethod
     def validate_hash(data):
-        received_hash = data.pop("verify_hash", None)
+        """
+        HMAC-SHA1 over the JSON body, the way Plisio signs it.
 
-        ordered_data = json.dumps(data, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
-        calculated_hash = hmac.new(
-            settings.PLISIO_SECRET_KEY.encode("utf-8"), ordered_data.encode("utf-8"), hashlib.sha1
-        ).hexdigest()
+        This only ever matches when the callback URL carries `?json=true` - without it Plisio
+        posts a form and signs PHP's `serialize()` of the sorted array, which is a different
+        algorithm entirely. The URL is sent with every invoice (see OrderCreateView), so that
+        parameter is not left to a dashboard setting.
 
-        # Constant-time: a plain == leaks how many leading bytes matched, and the attacker
-        # controls the value being compared.
-        return hmac.compare_digest(calculated_hash, received_hash or "")
+        Plisio's own SDK hashes the body in the order it arrived, non-ASCII escaped. Whether the
+        keys come sorted is not something we get to know, so both readings are accepted: each is
+        an HMAC with our own key, so accepting the second one forges nothing.
+        """
+
+        received_hash = data.pop("verify_hash", None) or ""
+
+        for candidate in (
+            json.dumps(data, separators=(",", ":")),
+            json.dumps(data, sort_keys=True, separators=(",", ":")),
+        ):
+            calculated = hmac.new(
+                settings.PLISIO_SECRET_KEY.encode("utf-8"), candidate.encode("utf-8"), hashlib.sha1
+            ).hexdigest()
+            # Constant-time: a plain == leaks how many leading bytes matched, and the value being
+            # compared is supplied by whoever posted the callback.
+            if hmac.compare_digest(calculated, received_hash):
+                return True
+
+        return False
 
     def post(self, request, *args, **kwargs):
         # Plisio posts form-encoded, so request.data is a QueryDict: `copy()` keeps it one, and a
