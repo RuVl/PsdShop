@@ -129,7 +129,11 @@ class PlisioCallbackView(APIView):
         return hmac.compare_digest(calculated_hash, received_hash or "")
 
     def post(self, request, *args, **kwargs):
-        data = request.data.copy()
+        # Plisio posts form-encoded, so request.data is a QueryDict: `copy()` keeps it one, and a
+        # QueryDict hands back *lists* from pop() and from dict(). That is why this is flattened
+        # first - the hash compare, the stored payload and callback_to_fields all want plain
+        # strings, and a JSON post (what the tests do) already arrives as a plain dict.
+        data = request.data.dict() if hasattr(request.data, "dict") else dict(request.data)
         if not self.validate_hash(data):
             logger.warning(f"Hash verification failed for transaction {data.get('txn_id')}")
             return Response(

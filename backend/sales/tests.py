@@ -180,6 +180,20 @@ class PlisioCallbackTests(SalesFactoryMixin, TestCase):
     def post_callback(self, **overrides):
         return self.client.post(self.url, sign_plisio_payload({**self.payload, **overrides}), format="json")
 
+    def test_a_form_encoded_callback_is_accepted(self):
+        # This is the shape Plisio actually posts. A QueryDict hands back lists, not strings, so
+        # a callback read straight off request.data never matched its own hash - and every JSON
+        # test above passed while production rejected the real thing.
+        response = self.client.post(self.url, sign_plisio_payload(self.payload))
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.order.refresh_from_db()
+        self.assertIsNotNone(self.order.paid_at)
+        # The stored payload has to be readable too, not a dict of one-element lists.
+        log = PaymentCallbackLog.objects.get()
+        self.assertEqual(log.payload["status"], "completed")
+        self.assertNotIn("verify_hash", log.payload)
+
     def test_paid_callback_delivers_and_emails_once(self):
         response = self.post_callback()
 
