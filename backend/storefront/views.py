@@ -13,6 +13,7 @@ from django.template import TemplateDoesNotExist
 from django.template.loader import get_template
 from django.urls import reverse
 
+from backend.sites import absolute_url
 from catalog.models import Country, DocumentType, Product
 from catalog.views import PAGE_SIZE
 from content.models import Page, Slide
@@ -123,6 +124,23 @@ def product(request, country=None, doctype=None, product_slug=""):
         "selected_type": item.document_type,
     }
     return render(request, "storefront/product.html", context)
+
+
+def robots(request):
+    """robots.txt: the paths a crawler has no business in, and where the map is.
+
+    Rendered by Django rather than served as a file so the Sitemap line carries the real host -
+    the `django_site` row and SITE_SCHEME, the same pair every other absolute link is built from.
+    Filters and pagination stay crawlable on purpose: `canonical` already collapses them, and
+    blocking the crawl would only hide the products behind them.
+    """
+
+    return render(
+        request,
+        "storefront/robots.txt",
+        {"sitemap_url": absolute_url(reverse("sitemap"), request)},
+        content_type="text/plain",
+    )
 
 
 def spa(request, **kwargs):
