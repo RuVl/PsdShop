@@ -56,7 +56,7 @@ make down          # stop; make ps / make logs[-backend|-db|-nginx]
 make dev-infra     # postgres only (docker-compose.dev.yaml), published to localhost:5432
 make dev-migrate   # migrate with the host backend against the dev db
 make dev-backend   # runserver 0.0.0.0:8000 on the host
-make dev-frontend  # vite dev server on 0.0.0.0:5173 (host; proxies /static and /media to :8000)
+make dev-frontend  # vite dev server: open http://localhost:5173/ (proxies /static and /media to :8000)
 make spa           # production SPA build: hashed assets into backend static, shell.html into templates
 make dev-superuser / make dev-infra-down
 make dev-reset     # recreate the dev-postgres container (keeps the psdshop_postgres volume/data)
@@ -453,7 +453,8 @@ postgres in docker:
   `DEBUG=True`, `DATABASE_URL` → `localhost:5432`, `EMAIL_URL=consolemail://` (dev mail prints to
   the backend console).
 - Typical loop: `make dev-infra` → `make dev-migrate` → `make dev-backend` (host, :8000) +
-  `make dev-frontend` (vite, :5173). No nginx locally. Seed a catalog once with `seed_testdata` so
+  `make dev-frontend` (vite, http://localhost:5173/ - the backend has to be up: the CSS, the
+  previews and the API all come from :8000). No nginx locally. Seed a catalog once with `seed_testdata` so
   the storefront isn't empty.
 
 ## Conventions

@@ -230,7 +230,7 @@ _Готово, когда:_ `make lint` и тесты зелёные, в код�
 make dev-infra && make dev-migrate            # база
 make dev-manage c="seed_testdata --flush"     # каталог
 make dev-backend                              # :8000
-make dev-frontend                             # vite dev server :5173 (проксирует /static и /media на :8000)
+make dev-frontend                             # vite dev server: http://localhost:5173/ (проксирует /static и /media на :8000)
 make spa                                      # прод-сборка: shell.html + ассеты в backend-дерево
 
 make dev-test                                 # тесты
