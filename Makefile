@@ -26,6 +26,12 @@
 #   make help   — полный список целей
 
 COMPOSE     ?= docker compose
+# nginx -t гоняется в стоковом образе с примонтированным frontend/nginx: ни сборки нашего образа,
+# ни настоящих сертификатов для проверки синтаксиса не нужно (--add-host: upstream `backend`
+# резолвится только внутри compose-сети).
+DOCKER       ?= docker
+NGINX_IMAGE  ?= docker.io/library/nginx:1.26.0
+NGINX_DOMAIN ?= example.com
 COMPOSE_DEV ?= docker compose -f docker-compose.dev.yaml
 UV          ?= uv
 RUFF        ?= uvx ruff@0.15.12
@@ -47,7 +53,8 @@ MANAGE_DEV ?= cd backend && $(UV) run --env-file .env --env-file dev.env python 
 # Читаем через Python (splitlines корректно срезает CRLF), лениво — только когда переменная нужна.
 PG_USER ?= $(shell $(UV) run --no-project python -c "import pathlib; p=pathlib.Path('postgres/.env'); vals=[l.split('=',1)[1].strip() for l in (p.read_text(encoding='utf-8').splitlines() if p.exists() else []) if l.startswith('POSTGRES_USER=')]; print(vals[0] if vals else 'user')")
 PG_DB   ?= $(shell $(UV) run --no-project python -c "import pathlib; p=pathlib.Path('postgres/.env'); vals=[l.split('=',1)[1].strip() for l in (p.read_text(encoding='utf-8').splitlines() if p.exists() else []) if l.startswith('POSTGRES_DB=')]; print(vals[0] if vals else 'database')")
-DUMP    ?= backups/dump.sql
+# Папка, которую docker-compose монтирует в контейнер postgres (там же лежат крон-бэкапы).
+DUMP    ?= postgres/backups/dump.sql
 m       ?=
 c       ?=
 FORCE   ?=
@@ -273,6 +280,22 @@ dev-frontend: ## Vite dev-сервер (http://localhost:5173/; /static, /media 
 spa: ## Собрать SPA: ассеты в backend/.../static/storefront/spa, shell.html в шаблоны Django
 	cd frontend && npm run build
 
+# --- nginx ------------------------------------------------------------------
+
+.PHONY: nginx-check
+nginx-check: ## Проверить конфиг nginx (envsubst + nginx -t в одноразовом контейнере)
+	$(DOCKER) run --rm --add-host backend:127.0.0.1 -v "$(CURDIR)/frontend/nginx:/conf:ro" \
+	  -e DOMAIN=$(NGINX_DOMAIN) $(NGINX_IMAGE) sh -c '\
+	  apt-get -qq update >/dev/null && apt-get -qq install -y gettext-base >/dev/null; \
+	  openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj "/CN=$$DOMAIN" \
+	    -keyout /etc/ssl/$$DOMAIN.key -out /etc/ssl/$$DOMAIN.crt >/dev/null 2>&1; \
+	  cp /conf/00-limits.conf /etc/nginx/conf.d/00-limits.conf; \
+	  cp /conf/proxy-backend.conf /etc/nginx/proxy-backend.conf; \
+	  cp /conf/site-body.conf /etc/nginx/site-body.conf; \
+	  rm -f /etc/nginx/conf.d/default.conf; \
+	  envsubst "\$$DOMAIN" < /conf/site.conf.template > /etc/nginx/conf.d/site.conf; \
+	  mkdir -p /usr/www/logs; nginx -t'
+
 # --- Качество кода ----------------------------------------------------------
 
 .PHONY: pre-commit-install
@@ -296,10 +319,10 @@ format: ## ruff format + автофиксы
 # --- Очистка ----------------------------------------------------------------
 
 .PHONY: clean
-clean: ## Удалить кэши (pycache, ruff); FRONT=1 - также frontend/node_modules и frontend/dist
+clean: ## Удалить кэши (pycache, ruff); FRONT=1 - также node_modules и собранный SPA
 	@$(UV) run --no-project python -c "import pathlib, shutil; [shutil.rmtree(p, ignore_errors=True) for n in ('__pycache__','.ruff_cache') for p in pathlib.Path('.').rglob(n)]"
 ifeq ($(FRONT),1)
-	@$(UV) run --no-project python -c "import shutil; [shutil.rmtree(p, ignore_errors=True) for p in ('frontend/node_modules', 'frontend/dist')]"
-	@echo "OK: node_modules и dist фронтенда удалены"
+	@$(UV) run --no-project python -c "import pathlib, shutil; [shutil.rmtree(p, ignore_errors=True) for p in ('frontend/node_modules', 'backend/storefront/static/storefront/spa')]; pathlib.Path('backend/storefront/templates/storefront/shell.html').unlink(missing_ok=True)"
+	@echo "OK: node_modules и сборка SPA удалены (вернуть: make install-frontend && make spa)"
 endif
 	@echo "OK: кэши очищены"

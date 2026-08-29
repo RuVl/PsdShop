@@ -1,5 +1,6 @@
 # env files
 .env
 
-# db backups
+# db backups (the directory itself stays, `make db-dump` writes into it)
 backups/*
+!backups/.gitkeep
