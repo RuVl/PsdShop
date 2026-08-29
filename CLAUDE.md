@@ -13,14 +13,19 @@ Domain vocabulary is in [`CONTEXT.md`](./CONTEXT.md), decisions in [`docs/adr/`]
 the running log of smaller ones - what was solved, how, and what it costs - is
 [`docs/journal.md`](./docs/journal.md); add an entry in the same commit that closes a fork.
 
-### Status: the code is mid-rework
+### Status: the rework is done, the shop is not launched
 
-The tree is a fork of **Verdoc**, a storefront for one-of-a-kind files. The infrastructure,
-payment, delivery, broadcasts and admin statistics are reused; the catalog, the fulfillment model,
-the currency and the whole design are being replaced. The roadmap, target schema and open
-questions live in [`docs/plan.md`](./docs/plan.md) - **read it before changing models**.
+The tree started as a fork of **Verdoc**, a storefront for one-of-a-kind files: the infrastructure,
+payment, delivery, broadcasts and admin statistics were kept, while the catalog, the fulfillment
+model, the currency and the whole design were replaced. All five stages of
+[`docs/plan.md`](./docs/plan.md) are shipped - read it before changing models, it still holds the
+target schema and the open questions.
 
-Already **in** the code (stages M1, M2 and M3 of the plan):
+What that leaves: the design corrections the owner is collecting (a separate pass, by their list),
+and the production launch itself - domain, certificates, the `django_site` row, DKIM, cron and
+backups - which was never part of this rework.
+
+The decisions the code rests on:
 
 | Decision | ADR |
 |---|---|
@@ -30,9 +35,8 @@ Already **in** the code (stages M1, M2 and M3 of the plan):
 | Dynamic rendering: every storefront URL answers twice from one view - search bots get the full Django-rendered page, people get the SPA shell (the vite-built `index.html` with this page's meta injected) and the Vue SPA takes over. ADR-0007 and ADR-0009 are superseded by it. | [0010](./docs/adr/0010-dynamic-rendering.md) |
 | Buying is one modal: the cart, or one template bought straight off a card ("buy now"), and the mail carries one link to the purchases page | [0002](./docs/adr/0002-customer-and-purchases-page.md) |
 
-**Still to do: M4 (sitemap.xml, robots.txt) and M5 (final cleanup, plus the design corrections the
-owner is collecting).** The Verdoc component set is gone from the frontend - every view is drawn
-with the design's own classes.
+The Verdoc component set is gone from the frontend - every view is drawn with the design's own
+classes.
 
 Everything below describes the code **as it is now** unless a line says otherwise.
 
@@ -93,7 +97,10 @@ make test          # in the container; make dev-test on the host (t="sales" or t
 # the catalog and the content pages/slides first.
 
 # DB
-make db-dump [DUMP=backups/dump.sql] / make db-restore DUMP=… / make psql
+make db-dump [DUMP=postgres/backups/dump.sql] / make db-restore DUMP=… / make psql
+
+# nginx
+make nginx-check   # envsubst + `nginx -t` in a stock nginx container (no image build, no certs)
 
 # Quality
 make lint          # ruff check + format --check (no edits)
@@ -126,13 +133,17 @@ invariants. Target runtime is **Python 3.13**.
   Its DB user/password/name **must match `postgres/.env`**.
 - The frontend has the same idea via Vite's mode files: `frontend/.env.development` (copy from
   `frontend/.env.development.dist`) is layered on top of `frontend/.env` **only for `npm run dev`**
-  (mode `development`); `vite build` (mode `production`) keeps using `frontend/.env`. It points
-  `VITE_API_URL` at the host backend (`http://localhost:8000/api`). `make env` creates it; the real
-  file is gitignored (the `.env.development.dist` template stays tracked).
+  (mode `development`). It points `VITE_API_URL` at the host backend
+  (`http://localhost:8000/api`) - a knob that exists for the dev server only. `make env` creates
+  it; the real file is gitignored (the `.env.development.dist` template stays tracked).
+  `frontend/.env` carries `DOMAIN` alone, for nginx's `envsubst`.
 - Settings use `django-environ`. Key vars: `DATABASE_URL`, `EMAIL_URL`, `PLISIO_SECRET_KEY`,
   `ALLOWED_HOSTS`, `CORS_ALLOWED_ORIGINS`, `CSRF_TRUSTED_ORIGINS`.
-- Frontend build injects `VITE_API_URL` as the compile-time constant `__API_URL__` (see
-  `vite.config.js`); the axios client in `src/api/index.js` uses Django's CSRF cookie/header.
+- `vite.config.js` compiles the API base into the constant `__API_URL__`: `VITE_API_URL` in dev,
+  and the same-origin `/api` in a production build, which is therefore not configurable - one
+  domain, one origin. The same file keeps `base` out of the dev server: the built SPA lives under
+  `/static/storefront/spa/`, the dev server answers from the root. The axios client in
+  `src/api/index.js` uses Django's CSRF cookie/header.
 - After first deploy, update the `django_site` row's domain to match your host - every absolute URL
   the backend hands out (download links, the purchases-page link in e-mails) is built from it plus
   `SITE_SCHEME` (`https` by default, set `SITE_SCHEME=http` in `dev.env` and point the site row at
@@ -144,6 +155,8 @@ invariants. Target runtime is **Python 3.13**.
 - `EMAIL_URL`'s **scheme picks the backend**: `smtp://` in production, `consolemail://` in dev
   prints the message to the backend console. Do not pass `backend=` to `env.email()` - it pins SMTP
   and makes the scheme a no-op.
+- The API answers **JSON only**; DRF's browsable renderer - a writable HTML form on every endpoint -
+  is added back under `DEBUG` alone (`REST_FRAMEWORK` in `settings.py`).
 
 ## Architecture
 
@@ -165,8 +178,14 @@ payment, delivery), `mailing` (broadcasts).
    URL is stored on `Order.invoice_url`, and if the request fails the order is deleted - the
    endpoint answers **502** with `{detail, code: "invoice_failed", provider_code}`, passing Plisio's
    own message on instead of a blanket "Error creating invoice".
-3. **Payment callback** - `POST /api/order/status` (`PlisioCallbackView`). Verifies `verify_hash`
-   (HMAC-SHA1) against `PLISIO_SECRET_KEY`, stores the raw payload in `PaymentCallbackLog`
+3. **Payment callback** - `POST /api/order/status` (`PlisioCallbackView`). **The invoice request
+   sends its own `callback_url`, ending in `?json=true`** (`sales/views.py: callback_url()`): that
+   parameter is what makes Plisio post JSON and sign the JSON body. Without it Plisio posts a form
+   and signs PHP's `serialize()` of the sorted array - a different algorithm, so every payment
+   would be refused at the door. Never drop it, and do not rely on the dashboard setting instead.
+   The view verifies `verify_hash` (HMAC-SHA1 over the body, both as received and key-sorted -
+   Plisio's own SDK does not sort, and each candidate is an HMAC with our key) against
+   `PLISIO_SECRET_KEY`, stores the raw payload in `PaymentCallbackLog`
    **before** the atomic block, then upserts the `Transaction` **by `txn_id`** (a currency switch
    mints a new invoice for the same order). On PAID/OVERPAID: `order.mark_paid()` stamps `paid_at`
    once and only that first call sends the e-mail; `order.deliver()` hands the files over. On
@@ -217,7 +236,8 @@ walked away from when switching coin - back into `PENDING`, so a status filter h
 were paid and delivered.
 
 **Checkout is rate limited at the edge** ([ADR-0005](./docs/adr/0005-checkout-rate-limits.md)):
-`limit_req` in nginx on `/api/order/` and `/api/send-links/` (the Plisio callback stays unlimited),
+`limit_req` in nginx on `/api/order/`, `/api/send-links/` and `/admin/login/` (the Plisio callback
+stays unlimited - a retry we refuse is a payment we never hear about),
 `MAX_ORDER_ITEMS`, and an MX check on the e-mail domain (`customer/validators.py`, fails open,
 `VALIDATE_EMAIL_MX`). A repeated checkout of the same cart is sent back to the live invoice
 (`Order.objects.reusable()`). A `Customer` row is created at checkout, before payment, so abandoned
@@ -294,9 +314,11 @@ One domain. `frontend/nginx/site.conf.template` is rendered by nginx's `envsubst
 **`site-body.conf`** from inside its `server` block - headers, locations, compression, timeouts.
 Two more plain (non-template) files: `00-limits.conf` holds the `limit_req` zones, which belong to
 the `http` context and must be declared exactly once, and `proxy-backend.conf` holds the
-`proxy_pass` block that every backend location includes. Validate a config change with `nginx -t`
-before deploying it (render the template with `sed`, mount it into a throwaway `nginx` container
-with dummy certs).
+`proxy_pass` block that every backend location includes. Validate a config change with
+**`make nginx-check`** - it renders the template with `envsubst` and runs `nginx -t` in a stock
+nginx container with the config mounted, so it needs neither our image nor real certificates.
+`frontend/nginx/ssl/` is a tracked empty directory: `frontend/Dockerfile` copies it, and without it
+a fresh checkout cannot build the nginx image.
 
 ### Broadcasts (`mailing`)
 
@@ -364,7 +386,11 @@ project directory here.
 
 ### Frontend
 
-Vue 3 + Pinia (with `pinia-plugin-persistedstate` for the cart), Vue Router, axios. Stores in
+Vue 3 + Pinia (with `pinia-plugin-persistedstate` for the cart), Vue Router, axios, and
+`glightbox` for the product gallery - that is the whole dependency list, and `npm ci` installs it
+from the tracked `package-lock.json`. Pinia is registered **before** the router in `src/main.js`:
+vue-router starts its first navigation from `install()`, and the `/` redirect reads the language
+store. Stores in
 `src/stores/`: `cart`, `catalog` (countries and document types), `content` (menu pages, site
 settings, slides), `order`, `settings` (the language only - the currency store is gone with USD).
 Every component under `src/components/` is now the storefront's own (`storefront/` plus the SVG
@@ -480,8 +506,8 @@ postgres in docker:
   `docs/` are intentionally Russian.
 - Backend style is enforced by ruff (line-length 120, double quotes) - run `make format` (or let
   pre-commit run it) before committing.
-- Work happens on `dev`; PRs target `main`. The repository has **no git history yet** - it was
-  cloned from Verdoc with `.git` removed.
+- Work happens on `dev`; PRs target `main`. History starts at the fork commit - the tree was
+  cloned from Verdoc with `.git` removed, so nothing before it exists here.
 - **Git commit messages are written in English, in the past tense**
   (`docs(adr): rewrote the catalog decision`), not the imperative. Conventional-Commit format, no
   co-authored tail. Only commit when the user explicitly asks.

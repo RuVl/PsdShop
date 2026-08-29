@@ -9,10 +9,12 @@ from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.http import FileResponse, HttpResponseNotFound
+from django.urls import reverse
 from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from backend.sites import absolute_url
 from catalog.models import Product
 from catalog.serializers import ProductListSerializer
 from customer.models import Customer
@@ -33,6 +35,18 @@ PLISIO_LANGUAGES = {
     "en": "en_US",
     "ru": "ru_RU",
 }
+
+
+def callback_url(request) -> str:
+    """Where Plisio reports this invoice, with the parameter that decides how it signs the report."""
+
+    return absolute_url(reverse("plisio-callback"), request) + "?json=true"
+
+
+def redact(value) -> str:
+    """Message with the Plisio API key blanked out - it rides in the request URL requests echoes."""
+
+    return str(value).replace(settings.PLISIO_SECRET_KEY, "***")
 
 
 class OrderCreateView(APIView):
@@ -64,6 +78,10 @@ class OrderCreateView(APIView):
             "api_key": settings.PLISIO_SECRET_KEY,
             "language": PLISIO_LANGUAGES.get(order.customer.language, "en_US"),
             "expire_min": "60",
+            # `?json=true` is what makes Plisio post JSON and sign it the way validate_hash checks;
+            # without it the callback arrives form-encoded, signed with PHP's serialize(), and no
+            # payment would ever be accepted. Sent per invoice so it cannot be lost in a dashboard.
+            "callback_url": callback_url(request),
         }
 
         response, payload = None, {}
@@ -72,9 +90,10 @@ class OrderCreateView(APIView):
             payload = response.json()
         except ValueError as e:
             # Includes requests' JSONDecodeError - the call went through, the body is not JSON.
-            logger.error(f"Plisio answered order {order.id} with something that is not JSON: {e}")
+            logger.error(f"Plisio answered order {order.id} with something that is not JSON: {redact(e)}")
         except requests.RequestException as e:
-            logger.error(f"Plisio is unreachable for order {order.id}: {e}")
+            # requests puts the request URL in the message, and the API key travels in it.
+            logger.error(f"Plisio is unreachable for order {order.id}: {redact(e)}")
 
         if response is not None and response.status_code == 200 and payload.get("status") == "success":
             logger.info(f"Order {order.id} created successfully")
@@ -110,17 +129,41 @@ class PlisioCallbackView(APIView):
 
     @staticmethod
     def validate_hash(data):
-        received_hash = data.pop("verify_hash", None)
+        """
+        HMAC-SHA1 over the JSON body, the way Plisio signs it.
 
-        ordered_data = json.dumps(data, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
-        calculated_hash = hmac.new(
-            settings.PLISIO_SECRET_KEY.encode("utf-8"), ordered_data.encode("utf-8"), hashlib.sha1
-        ).hexdigest()
+        This only ever matches when the callback URL carries `?json=true` - without it Plisio
+        posts a form and signs PHP's `serialize()` of the sorted array, which is a different
+        algorithm entirely. The URL is sent with every invoice (see OrderCreateView), so that
+        parameter is not left to a dashboard setting.
 
-        return calculated_hash == received_hash
+        Plisio's own SDK hashes the body in the order it arrived, non-ASCII escaped. Whether the
+        keys come sorted is not something we get to know, so both readings are accepted: each is
+        an HMAC with our own key, so accepting the second one forges nothing.
+        """
+
+        received_hash = data.pop("verify_hash", None) or ""
+
+        for candidate in (
+            json.dumps(data, separators=(",", ":")),
+            json.dumps(data, sort_keys=True, separators=(",", ":")),
+        ):
+            calculated = hmac.new(
+                settings.PLISIO_SECRET_KEY.encode("utf-8"), candidate.encode("utf-8"), hashlib.sha1
+            ).hexdigest()
+            # Constant-time: a plain == leaks how many leading bytes matched, and the value being
+            # compared is supplied by whoever posted the callback.
+            if hmac.compare_digest(calculated, received_hash):
+                return True
+
+        return False
 
     def post(self, request, *args, **kwargs):
-        data = request.data.copy()
+        # Plisio posts form-encoded, so request.data is a QueryDict: `copy()` keeps it one, and a
+        # QueryDict hands back *lists* from pop() and from dict(). That is why this is flattened
+        # first - the hash compare, the stored payload and callback_to_fields all want plain
+        # strings, and a JSON post (what the tests do) already arrives as a plain dict.
+        data = request.data.dict() if hasattr(request.data, "dict") else dict(request.data)
         if not self.validate_hash(data):
             logger.warning(f"Hash verification failed for transaction {data.get('txn_id')}")
             return Response(

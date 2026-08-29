@@ -264,7 +264,7 @@ class TimeToPayTests(StatisticsFactoryMixin, TestCase):
 
         self.assertEqual(statistics.time_to_pay(self.period)["median"], timedelta(minutes=25))
 
-    def test_orders_paid_after_the_reservation_expired_are_flagged(self):
+    def test_orders_paid_after_the_invoice_expired_are_flagged(self):
         self.pay_after(10)
         self.pay_after(120)
 

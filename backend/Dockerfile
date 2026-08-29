@@ -7,13 +7,13 @@ LABEL authors="RuVl_13"
 
 WORKDIR /frontend
 
-COPY frontend/package.json ./
-RUN npm install --verbose
+COPY frontend/package.json frontend/package-lock.json ./
+# From the lockfile, so an image built months later carries the versions we tested.
+RUN npm ci
 
 COPY frontend/ ./
-# One domain in production, so the API is same-origin.
-ARG VITE_API_URL=/api
-ENV VITE_API_URL=$VITE_API_URL
+# The API host is not configurable here: one domain in production, so a production build always
+# talks to the same-origin /api (see `__API_URL__` in frontend/vite.config.js).
 # vite writes to ../backend/storefront/... relative to /frontend (OUT_DIR in vite.config.js).
 RUN npm run build
 
@@ -52,9 +52,9 @@ COPY backend/ .
 COPY --from=spa-build /backend/storefront/static/storefront/spa ./storefront/static/storefront/spa
 COPY --from=spa-build /backend/storefront/templates/storefront/shell.html ./storefront/templates/storefront/shell.html
 
-# Copy the cronjob, apply it
-COPY backend/cronjob /etc/cron.d/expire-orders-cron
-RUN crontab /etc/cron.d/expire-orders-cron
+# Copy the cronjob, apply it (broadcasts every 15 min, callback log pruning weekly)
+COPY backend/cronjob /etc/cron.d/psdshop-cron
+RUN crontab /etc/cron.d/psdshop-cron
 
 # Run gunicorn
 RUN chmod +x ./startup.sh

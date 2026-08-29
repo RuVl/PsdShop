@@ -3,7 +3,6 @@
     "add2cart": "Add to cart",
     "buy": "Buy",
     "buy_now": "Buy now",
-    "cart": "@:routes.cart",
     "close": "Close",
     "copied": "Copied",
     "copy_link": "Copy link",
@@ -11,7 +10,6 @@
     "download": "Download",
     "go_back_home": "Go back home",
     "pay": "Pay",
-    "payment_method": "Choose a payment method",
     "refresh_all_links": "Refresh all links",
     "refresh_link": "Refresh link",
     "request_new_link": "Request a new link",
@@ -19,7 +17,6 @@
     "send_links": "Send links",
     "stay_subscribed": "Keep my subscription",
     "support": "Store support",
-    "to_cart": "@:buttons.add2cart",
     "to_catalog": "Go to the catalog",
     "unsubscribe": "Unsubscribe"
   },
@@ -55,7 +52,6 @@
     "page_not_found": "We couldn’t find the page you were looking for. It may have been moved, or it just doesn’t exist."
   },
   "products": {
-    "empty": "There are no products yet. Come back later.",
     "error": "Could not load the product list. Check your connection and try again.",
     "loading": "Loading the product list..."
   },
@@ -111,9 +107,7 @@
       "title": "Online store of PDF files"
     },
     "nav": {
-      "contacts": "Contacts",
-      "home": "Home",
-      "rules": "Rules"
+      "home": "Home"
     },
     "product": {
       "title": "Product card"
