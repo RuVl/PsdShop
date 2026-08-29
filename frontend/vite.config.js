@@ -40,7 +40,10 @@ export default defineConfig(({mode}) => {
             // never bake in a host. The dev server takes VITE_API_URL (.env.development).
             __API_URL__: JSON.stringify(mode === 'development' ? (env.VITE_API_URL || 'http://localhost:8000/api') : '/api')
         },
-        base: '/static/storefront/spa/',
+        // Production puts the SPA in the backend static tree, so its assets are addressed
+        // from there. The dev server must stay on the root instead: a base under /static would
+        // be swallowed by the proxy below, which sends every /static request to Django.
+        base: mode === 'production' ? '/static/storefront/spa/' : '/',
         plugins: [
             // Design images are absolute /static/... URLs served by the backend - leave them
             // alone instead of trying to bundle them.

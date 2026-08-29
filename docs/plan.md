@@ -206,8 +206,10 @@ Plisio, письмо в консоли, скачивание файла по с�
 (`POST /api/order/` без количеств, токены на `OrderItem`, `sales/statistics.py`) в M3 не менялась.
 
 **M4 — SEO-обвязка.** Мета из моделей с автоподстановкой, `ld+json` (Product + Offer,
-BreadcrumbList), `sitemap.xml` с hreflang, `robots.txt`, canonical, 301 с `all/all`, `noindex` на
-корзину, покупки и отписку.
+BreadcrumbList), canonical, 301 с `all/all` и `noindex` на корзину, покупки и отписку сделаны ещё
+на M2 вместе с `storefront/seo.py`; этап добавляет `sitemap.xml` (индекс над секциями, обе
+языковые версии и hreflang внутри), `robots.txt` и `x-default` в `<head>` — той же формулой, что
+у карты, чтобы обе подачи говорили одно.
 _Готово, когда:_ `curl` показывает текст страницы без JS, у каждой страницы уникальные title и
 description, карта сайта валидна и содержит обе языковые версии.
 
@@ -230,7 +232,7 @@ _Готово, когда:_ `make lint` и тесты зелёные, в код�
 make dev-infra && make dev-migrate            # база
 make dev-manage c="seed_testdata --flush"     # каталог
 make dev-backend                              # :8000
-make dev-frontend                             # vite dev server :5173 (проксирует /static и /media на :8000)
+make dev-frontend                             # vite dev server: http://localhost:5173/ (проксирует /static и /media на :8000)
 make spa                                      # прод-сборка: shell.html + ассеты в backend-дерево
 
 make dev-test                                 # тесты

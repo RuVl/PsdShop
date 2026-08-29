@@ -42,6 +42,8 @@ INSTALLED_APPS = [
     "django.contrib.messages",
     "django.contrib.staticfiles",
     "django.contrib.sites",
+    # Ships the sitemap.xml template the storefront map is rendered with.
+    "django.contrib.sitemaps",
     "rest_framework",
     "corsheaders",
     "tinymce",

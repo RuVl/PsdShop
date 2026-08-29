@@ -53,7 +53,11 @@ def build_meta(
         "title": title,
         "description": description or default_description(),
         "canonical": canonical,
-        "alternates": [(code, absolute_url(translate_url(path, code), request)) for code, _name in settings.LANGUAGES],
+        "alternates": [
+            *((code, absolute_url(translate_url(path, code), request)) for code, _name in settings.LANGUAGES),
+            x_default(path, request),
+        ],
+        "site_name": site_name(),
         "og_type": og_type,
         "og_image": og_image,
         # Serialized here, with `<` escaped so a value can never close the <script> tag; the
@@ -61,6 +65,19 @@ def build_meta(
         "ld_json": mark_safe(json.dumps(ld, ensure_ascii=False).replace("<", "\\u003c")) if ld else None,  # noqa: S308
         "noindex": noindex,
     }
+
+
+def x_default(path: str, request: HttpRequest | None) -> tuple[str, str]:
+    """The hreflang for a visitor none of the languages match: the address without a prefix.
+
+    `/` (and `/germany/all/`) is what `LocaleMiddleware` redirects by Accept-Language, so it is
+    the one address that answers in the visitor's own language. Built by dropping the default
+    language's prefix - the same construction `django.contrib.sitemaps` uses for its x-default
+    alternate, so the <head> and the sitemap advertise the same URL.
+    """
+
+    default = translate_url(path, settings.LANGUAGE_CODE)
+    return "x-default", absolute_url(default.replace(f"/{settings.LANGUAGE_CODE}/", "/", 1), request)
 
 
 def catalog_meta(request: HttpRequest, country=None, doctype=None, home_page=None) -> dict:

@@ -9,7 +9,9 @@ PsdShop is a digital-goods storefront: customers buy template documents (PSD/PDF
 download the files from. Vue 3 SPA frontend + Django REST Framework backend + PostgreSQL, all
 orchestrated with Docker Compose behind nginx, on a single domain.
 
-Domain vocabulary is in [`CONTEXT.md`](./CONTEXT.md), decisions in [`docs/adr/`](./docs/adr/).
+Domain vocabulary is in [`CONTEXT.md`](./CONTEXT.md), decisions in [`docs/adr/`](./docs/adr/), and
+the running log of smaller ones - what was solved, how, and what it costs - is
+[`docs/journal.md`](./docs/journal.md); add an entry in the same commit that closes a fork.
 
 ### Status: the code is mid-rework
 
@@ -56,7 +58,7 @@ make down          # stop; make ps / make logs[-backend|-db|-nginx]
 make dev-infra     # postgres only (docker-compose.dev.yaml), published to localhost:5432
 make dev-migrate   # migrate with the host backend against the dev db
 make dev-backend   # runserver 0.0.0.0:8000 on the host
-make dev-frontend  # vite dev server on 0.0.0.0:5173 (host; proxies /static and /media to :8000)
+make dev-frontend  # vite dev server: open http://localhost:5173/ (proxies /static and /media to :8000)
 make spa           # production SPA build: hashed assets into backend static, shell.html into templates
 make dev-superuser / make dev-infra-down
 make dev-reset     # recreate the dev-postgres container (keeps the psdshop_postgres volume/data)
@@ -383,6 +385,17 @@ shared: `storefront/_bgs_decor.html` and `components/storefront/HeroHeader.vue` 
 decor/wave block from the design, and the dark strip must stay on every page (the header is
 `position: fixed`, so without it the content slides underneath).
 
+**What crawlers read** lives beside the storefront views and outside `i18n_patterns`:
+`storefront/sitemaps.py` (`/sitemap.xml`, an index over `/sitemap-<section>.xml`) and
+`storefront/templates/storefront/robots.txt`. The map is `django.contrib.sitemaps` with
+`i18n`/`alternates`/`x_default`, so one entry carries both languages and its hreflang set; sections
+list only what the storefront lists (`active()`, `non_empty()`, `with_product_counts()`), and the
+`noindex` service pages are absent by construction. It is an index rather than one file because
+`Sitemap.limit` counts per section. `x-default` is the address without a language prefix - the same
+string `seo.x_default` puts in `<head>`, so the two presentations advertise one URL. robots.txt is
+rendered by Django so its `Sitemap:` line is built from `django_site` + `SITE_SCHEME` like every
+other absolute link.
+
 **Verify in a browser before calling a storefront stage done** - green tests and `curl` do not
 catch a blank grid, a dead button or a layout that overflows at 320px. Run `make dev-backend`
 plus `make dev-frontend` (or `make spa` and the backend alone), then click through: catalog,
@@ -453,7 +466,8 @@ postgres in docker:
   `DEBUG=True`, `DATABASE_URL` → `localhost:5432`, `EMAIL_URL=consolemail://` (dev mail prints to
   the backend console).
 - Typical loop: `make dev-infra` → `make dev-migrate` → `make dev-backend` (host, :8000) +
-  `make dev-frontend` (vite, :5173). No nginx locally. Seed a catalog once with `seed_testdata` so
+  `make dev-frontend` (vite, http://localhost:5173/ - the backend has to be up: the CSS, the
+  previews and the API all come from :8000). No nginx locally. Seed a catalog once with `seed_testdata` so
   the storefront isn't empty.
 
 ## Conventions

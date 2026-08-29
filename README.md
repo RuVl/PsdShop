@@ -38,7 +38,7 @@ the state of the rework in [`docs/plan.md`](./docs/plan.md).
      ```bash
      make init         # deps -> .env -> install -> pre-commit -> dev-postgres -> migrate
      make dev-backend  # runserver on the host (:8000)
-     make dev-frontend # vite dev server (:5173)
+     make dev-frontend # vite dev server on http://localhost:5173/ (needs dev-backend)
      ```
 
    `make help` lists every target; [`CLAUDE.md`](./CLAUDE.md) has the detailed reference.
