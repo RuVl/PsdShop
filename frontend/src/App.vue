@@ -1,18 +1,16 @@
 <script setup>
-import {computed, ref} from 'vue';
+import {computed, onBeforeUnmount, onMounted, ref} from 'vue';
 import {useRoute} from 'vue-router';
 import LangSwitch from '@/components/storefront/LangSwitch.vue';
-import FloatingCart from '@/components/storefront/FloatingCart.vue';
-import HeroHeader from '@/components/storefront/HeroHeader.vue';
+import CartButton from '@/components/storefront/CartButton.vue';
+import PageDecor from '@/components/storefront/PageDecor.vue';
 import {useContentStore} from '@/stores/content.js';
-import {useLocalized} from '@/composables/localized.js';
 
 // The design's shell: header with menu and language flag, the page, footer, floating cart.
 // Markup and classes follow design/index.html (the storefront style.css is linked globally).
 // The menu pages and the footer texts come from the content API - same rows the bot pages render.
 const route = useRoute();
 const contentStore = useContentStore();
-const localized = useLocalized();
 contentStore.load();
 
 const lang = computed(() => route.params.lang || 'en');
@@ -31,10 +29,37 @@ function closeMenu() {
     menuOpen.value = false;
     document.body.classList.remove('lock');
 }
+
+// The header is `position: fixed` over a light page, so without a background it dissolves into
+// the content as soon as anything scrolls under it. The design solves that in app.js: paint it
+// black past the fold (`header-scrolled`) and slide it away while the reader moves down (`out`).
+const scrolled = ref(false);
+const hidden = ref(false);
+let previousScroll = 0;
+let ticking = false;
+
+function onScroll() {
+    if (ticking) return;
+    ticking = true;
+    requestAnimationFrame(() => {
+        const current = Math.round(window.scrollY);
+        scrolled.value = current > 0;
+        // Never hide the header while the mobile menu is open - it is the menu.
+        hidden.value = !menuOpen.value && current > 100 && current > previousScroll;
+        previousScroll = current;
+        ticking = false;
+    });
+}
+
+onMounted(() => {
+    onScroll();
+    window.addEventListener('scroll', onScroll, {passive: true});
+});
+onBeforeUnmount(() => window.removeEventListener('scroll', onScroll));
 </script>
 
 <template>
-  <header class="header" :class="{'header-active': menuOpen}">
+  <header class="header" :class="{'header-active': menuOpen, 'header-scrolled': scrolled, out: hidden}">
     <div class="container">
       <div class="header__body">
         <router-link :to="home" class="logo opacity" @click="closeMenu">
@@ -47,7 +72,7 @@ function closeMenu() {
             </li>
             <li v-for="navPage in contentStore.pages" :key="navPage.slug" class="menu__item white link-primary"
                 @click="closeMenu">
-              <router-link :to="{name: 'page', params: {lang, pageSlug: navPage.slug}}">{{ localized(navPage, 'title') }}</router-link>
+              <router-link :to="{name: 'page', params: {lang, pageSlug: navPage.slug}}">{{ navPage.title }}</router-link>
             </li>
           </ul>
           <LangSwitch/>
@@ -62,7 +87,7 @@ function closeMenu() {
     </div>
   </header>
 
-  <HeroHeader :show-hero="showHero"/>
+  <PageDecor :show-hero="showHero"/>
 
   <router-view/>
 
@@ -73,8 +98,8 @@ function closeMenu() {
           <router-link :to="home" class="logo opacity">
             <picture class="logo__img"><img src="/static/storefront/img/icons/logo-footer.png" alt="Logo icon"></picture>
           </router-link>
-          <p v-if="contentStore.settings && localized(contentStore.settings, 'footer_note')" class="text-small black">
-            {{ localized(contentStore.settings, 'footer_note') }}
+          <p v-if="contentStore.settings && contentStore.settings.footer_note" class="text-small black">
+            {{ contentStore.settings.footer_note }}
           </p>
         </div>
         <div class="footer__block">
@@ -85,7 +110,7 @@ function closeMenu() {
                 <router-link :to="home">{{ $t('storefront.nav.home') }}</router-link>
               </li>
               <li v-for="navPage in contentStore.pages" :key="navPage.slug" class="footer__item text black link-primary">
-                <router-link :to="{name: 'page', params: {lang, pageSlug: navPage.slug}}">{{ localized(navPage, 'title') }}</router-link>
+                <router-link :to="{name: 'page', params: {lang, pageSlug: navPage.slug}}">{{ navPage.title }}</router-link>
               </li>
             </ul>
           </div>
@@ -98,5 +123,5 @@ function closeMenu() {
     </div>
   </footer>
 
-  <FloatingCart/>
+  <CartButton/>
 </template>

@@ -1,5 +1,6 @@
 import {defineStore} from 'pinia';
 import {fetchCartItems} from '@/api/order.js';
+import Product from '@/models/Product.js';
 
 // A cart line is a product payload from the catalog API (both languages ride along). A product
 // is a template sold any number of times, but an order holds it at most once (ADR-0001), so
@@ -40,5 +41,12 @@ export const useCartStore = defineStore('cart', {
             this.items = this.items.map(item => byId.get(item.id)).filter(Boolean);
         },
     },
-    persist: true,
+    // localStorage can only hold JSON, so the lines come back as plain objects and have to be
+    // turned into products again - otherwise `item.name` (a getter on the class) is undefined
+    // until the first refresh() replaces them.
+    persist: {
+        afterHydrate: ({store}) => {
+            store.items = store.items.map(item => (item instanceof Product ? item : new Product(item)));
+        },
+    },
 });

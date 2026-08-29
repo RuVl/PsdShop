@@ -1,4 +1,5 @@
 import api from '@/api/index.js';
+import Product from '@/models/Product.js';
 
 // Everything the buying half of the storefront talks to: the checkout, the cart's own lines and
 // the two token pages (purchases, unsubscribe). Errors are deliberately not caught here - the
@@ -16,7 +17,8 @@ export async function createOrder({email, language, products}) {
 // off the shelf is simply absent from the answer, and a price that moved arrives corrected.
 export async function fetchCartItems(ids) {
     if (!ids.length) return [];
-    return (await api.get('/cart/items/', {params: {ids: ids.join(',')}})).data;
+    const {data} = await api.get('/cart/items/', {params: {ids: ids.join(',')}});
+    return data.map(item => new Product(item));
 }
 
 export async function sendPurchasesLinks({email, language}) {

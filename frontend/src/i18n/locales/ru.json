@@ -99,6 +99,7 @@
       "all_products": "Все товары",
       "empty": "По этому запросу ничего не найдено.",
       "load_more": "Показать ещё",
+      "load_previous": "Загрузить предыдущие",
       "not_found": "@:other.page_not_found",
       "title": "Список товаров"
     },

@@ -7,7 +7,9 @@ import {SUPPORT_LOCALES} from "@/i18n/index.js";
 // The language lives in the path; Django serves the same URLs to bots.
 const routes = [
     {
-        path: `/:lang(${SUPPORT_LOCALES.join('|')})`,
+        // The trailing slash is part of the address: Django serves `/en/` and canonicalises to it,
+        // so a client-side navigation must not quietly drop it.
+        path: `/:lang(${SUPPORT_LOCALES.join('|')})/`,
         children: [
             {
                 name: 'home',

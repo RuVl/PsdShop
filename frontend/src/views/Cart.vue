@@ -2,17 +2,15 @@
 import {computed, onMounted, ref} from 'vue';
 import {useRoute} from 'vue-router';
 import {storeToRefs} from 'pinia';
-import BuyModal from '@/components/storefront/BuyModal.vue';
+import CheckoutModal from '@/components/storefront/CheckoutModal.vue';
 import IconTrash from '@/components/icons/IconTrash.vue';
 import {useCartStore} from '@/stores/cart.js';
-import {useLocalized} from '@/composables/localized.js';
 
 // The cart itself lives in localStorage (ADR-0010) - this page is its view, drawn with the
 // design's storefront classes. A line is a catalog card payload: no quantities, USD only.
 const route = useRoute();
 const cartStore = useCartStore();
 const {cartItems, cartItemCount, totalPrice} = storeToRefs(cartStore);
-const localized = useLocalized();
 
 const lang = computed(() => route.params.lang || 'en');
 
@@ -49,18 +47,16 @@ onMounted(async () => {
 
           <ul class="cart__list list-reset">
             <li v-for="item in cartItems" :key="item.id" class="cart__item">
-              <router-link class="cart__preview"
-                           :to="{name: 'product', params: {lang, country: item.country, type: item.document_type, productSlug: item.url_slug}}">
-                <img v-if="item.preview?.card" :src="item.preview.card" :alt="localized(item)">
-              </router-link>
+              <div class="cart__preview">
+                <img v-if="item.preview?.card" :src="item.preview.card" :alt="item.name">
+              </div>
 
               <div class="cart__body">
-                <router-link class="cart__title text black"
-                             :to="{name: 'product', params: {lang, country: item.country, type: item.document_type, productSlug: item.url_slug}}">
-                  {{ localized(item) }}
-                </router-link>
+                <!-- The whole row opens the product: this link is stretched over the card by
+                     .cart__title::after, and the delete button is lifted above it. -->
+                <router-link class="cart__title text black" :to="item.route(lang)">{{ item.name }}</router-link>
                 <div class="cart__price text-small">
-                  {{ $t('cart_view.cost') }}: <span class="primary">${{ Number(item.price).toFixed(2) }}</span>
+                  {{ $t('cart_view.cost') }}: <span class="primary">{{ item.priceLabel }}</span>
                 </div>
               </div>
 
@@ -86,7 +82,7 @@ onMounted(async () => {
       </div>
     </section>
 
-    <BuyModal v-model:open="paying"/>
+    <CheckoutModal v-model:open="paying"/>
   </main>
 </template>
 
@@ -100,30 +96,45 @@ onMounted(async () => {
   display: flex;
   flex-direction: column;
   gap: 10px;
+  width: 100%;
   margin: 25px 0 0;
   padding: 0;
 }
 
 /* The card of the mockup's basket row: white, soft shadow, 15px radius. */
 .cart__item {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 20px;
+  width: 100%;
   padding: 15px 23px;
   background: #fff;
   border-radius: 15px;
   box-shadow: 0 0 81px 0 rgba(0, 0, 0, .1);
+  transition: box-shadow .3s ease;
 }
 
+.cart__item:hover {
+  box-shadow: 0 0 40px 0 rgba(33, 54, 255, .18);
+}
+
+/* A fixed box, cropped like the grid card does it: uploads are not one shape, and a portrait
+   scan used to stretch its row to three times the height of its neighbours. */
 .cart__preview {
   flex: 0 0 auto;
   width: 72px;
+  height: 72px;
+  overflow: hidden;
+  border-radius: 10px;
+  background: #eef1f8;
   line-height: 0;
 }
 
 .cart__preview img {
   width: 100%;
-  border-radius: 10px;
+  height: 100%;
+  object-fit: cover;
 }
 
 .cart__body {
@@ -140,6 +151,15 @@ onMounted(async () => {
   transition: color .3s ease;
 }
 
+/* Stretched link: the row is the click target, so a customer can reopen the product from
+   anywhere on the card. The delete button sits above it (z-index below). */
+.cart__title::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 15px;
+}
+
 .cart__title:hover {
   color: #6238f0;
 }
@@ -149,6 +169,8 @@ onMounted(async () => {
 }
 
 .cart__remove {
+  position: relative;
+  z-index: 1;
   flex: 0 0 auto;
   width: 36px;
   height: 36px;

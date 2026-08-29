@@ -14,13 +14,14 @@ const label = computed(() => (other.value === 'ru' ? 'Russian' : 'English'));
 
 <template>
   <router-link class="lang opacity" :to="target" :title="label" :aria-label="label">
-    <svg v-if="other === 'ru'" class="lang__flag" viewBox="0 0 9 6" width="28" height="18" role="img"
-         aria-hidden="true">
+    <svg v-if="other === 'ru'" class="lang__flag" viewBox="0 0 9 6" preserveAspectRatio="xMidYMid slice"
+         role="img" aria-hidden="true">
       <rect width="9" height="6" fill="#fff"/>
       <rect width="9" height="4" y="2" fill="#0039A6"/>
       <rect width="9" height="2" y="4" fill="#D52B1E"/>
     </svg>
-    <svg v-else class="lang__flag" viewBox="0 0 60 30" width="28" height="18" role="img" aria-hidden="true">
+    <svg v-else class="lang__flag" viewBox="0 0 60 30" preserveAspectRatio="xMidYMid slice" role="img"
+         aria-hidden="true">
       <clipPath id="lang-gb-clip">
         <path d="M0,0 v30 h60 v-30 z"/>
       </clipPath>
@@ -35,8 +36,13 @@ const label = computed(() => (other.value === 'ru' ? 'Russian' : 'English'));
 </template>
 
 <style scoped>
+/* One box for both flags. Their proportions differ (3:2 against 2:1), so fitting them into it
+   would leave the British one narrower - `slice` crops instead, the way object-fit: cover does.
+   The width is the design's own (.lang__img). */
 .lang__flag {
   display: block;
+  width: 25px;
+  height: 17px;
   border-radius: 2px;
 }
 </style>

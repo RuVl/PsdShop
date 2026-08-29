@@ -2,7 +2,6 @@
 import {computed, ref} from 'vue';
 import {useRoute} from 'vue-router';
 import {useCatalogStore} from '@/stores/catalog.js';
-import {useLocalized} from '@/composables/localized.js';
 
 // The "store categories" sidebar per design/index.html - shared by the listing and the
 // product page. Links keep the current document-type filter.
@@ -13,7 +12,6 @@ const props = defineProps({
 
 const route = useRoute();
 const catalogStore = useCatalogStore();
-const localized = useLocalized();
 
 const lang = computed(() => route.params.lang || 'en');
 const countryQuery = ref('');
@@ -21,7 +19,7 @@ const countryQuery = ref('');
 const visibleCountries = computed(() => {
     const query = countryQuery.value.trim().toLowerCase();
     if (!query) return catalogStore.countries;
-    return catalogStore.countries.filter(country => localized(country).toLowerCase().includes(query));
+    return catalogStore.countries.filter(country => country.name.toLowerCase().includes(query));
 });
 
 function target(country) {
@@ -46,7 +44,7 @@ function target(country) {
               class="categories__item" :class="{current: country.slug === countrySlug}">
             <router-link :to="target(country.slug)">
               <span class="categories__item-icon">{{ country.flag }}</span>
-              <span class="categories__item-title text black">{{ localized(country) }}</span>
+              <span class="categories__item-title text black">{{ country.name }}</span>
               <span class="categories__item-count badge text-small primary">{{ country.products_count }}</span>
             </router-link>
           </li>
@@ -69,7 +67,7 @@ function target(country) {
               class="categories__item" :class="{current: country.slug === countrySlug}">
             <router-link :to="target(country.slug)">
               <span class="categories__item-icon">{{ country.flag }}</span>
-              <span class="categories__item-title text black">{{ localized(country) }}</span>
+              <span class="categories__item-title text black">{{ country.name }}</span>
               <span class="categories__item-count badge text-small primary">{{ country.products_count }}</span>
             </router-link>
           </li>

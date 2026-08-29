@@ -99,6 +99,7 @@
       "all_products": "All products",
       "empty": "Nothing found for this selection.",
       "load_more": "Show more",
+      "load_previous": "Load previous",
       "not_found": "@:other.page_not_found",
       "title": "Product list"
     },

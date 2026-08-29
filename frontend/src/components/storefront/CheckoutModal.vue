@@ -3,7 +3,6 @@ import {computed, nextTick, onBeforeUnmount, ref, watch} from 'vue';
 import IconCross from '@/components/icons/IconCross.vue';
 import {useOrderStore} from '@/stores/order.js';
 import {useCartStore} from '@/stores/cart.js';
-import {useLocalized} from '@/composables/localized.js';
 import {errorMessageKey} from '@/api/errors.js';
 
 // The one place an order is paid for, in the design's modal markup (`.remodal.modalpay` and the
@@ -19,7 +18,6 @@ const open = defineModel('open', {default: false});
 
 const orderStore = useOrderStore();
 const cart = useCartStore();
-const localized = useLocalized();
 
 const email = ref('');
 const sending = ref(false);
@@ -92,8 +90,8 @@ onBeforeUnmount(() => {
 
           <div class="modal-buy__props">
             <div v-for="line in lines" :key="line.id" class="modal-buy__props_item buy-modal__line">
-              <span class="modal-buy__props_label">{{ localized(line) }}</span>
-              <span class="modal-buy__props_value">${{ Number(line.price).toFixed(2) }}</span>
+              <span class="modal-buy__props_label">{{ line.name }}</span>
+              <span class="modal-buy__props_value">{{ line.priceLabel }}</span>
             </div>
             <p v-if="!lines.length" class="modal-buy__props_label">{{ $t('cart_view.empty') }}</p>
           </div>

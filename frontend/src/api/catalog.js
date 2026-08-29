@@ -1,14 +1,20 @@
 import api from '@/api/index.js';
+import Country from '@/models/Country.js';
+import DocumentType from '@/models/DocumentType.js';
+import Product from '@/models/Product.js';
 
 // The catalog API mirrors the bot pages: same querysets, same "unknown slug is a 404" rule.
-// Every payload carries both languages, so a language switch never refetches.
+// Every payload carries both languages, so a language switch never refetches. This module is the
+// border between HTTP and the app: what leaves it is a model, never a raw payload.
 
 export async function fetchCountries() {
-    return (await api.get('/catalog/countries/')).data;
+    const {data} = await api.get('/catalog/countries/');
+    return data.map(item => new Country(item));
 }
 
 export async function fetchDocumentTypes() {
-    return (await api.get('/catalog/document-types/')).data;
+    const {data} = await api.get('/catalog/document-types/');
+    return data.map(item => new DocumentType(item));
 }
 
 export async function fetchProducts({country, type, page} = {}) {
@@ -16,9 +22,11 @@ export async function fetchProducts({country, type, page} = {}) {
     if (country && country !== 'all') params.country = country;
     if (type && type !== 'all') params.type = type;
     if (page && page > 1) params.page = page;
-    return (await api.get('/catalog/products/', {params})).data;
+
+    const {data} = await api.get('/catalog/products/', {params});
+    return {count: data.count, results: data.results.map(item => new Product(item))};
 }
 
 export async function fetchProduct(id) {
-    return (await api.get(`/catalog/products/${id}/`)).data;
+    return new Product((await api.get(`/catalog/products/${id}/`)).data);
 }
