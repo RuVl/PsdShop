@@ -80,13 +80,36 @@
                         </div>
 
                         {% if page_obj.has_other_pages %}
-                        <nav class="pagination">
+                        {% comment %}
+                            Numbered pages, the same set and the same addresses the SPA renders
+                            (components/storefront/Pagination.vue) - a crawler walks every page
+                            from any of them, not only the next one.
+                        {% endcomment %}
+                        <nav class="pagination" aria-label="{% translate "Catalog pages" %}">
                             {% if page_obj.has_previous %}
-                                <a class="btn text" href="?page={{ page_obj.previous_page_number }}">{% translate "Previous" %}</a>
+                                {% comment %}
+                                    Page 1 is the listing's own address, without a parameter - the
+                                    URL `canonical` prints and the SPA links.
+                                {% endcomment %}
+                                <a class="btn btn-ghost pagination__step" rel="prev"
+                                   href="{% if page_obj.previous_page_number == 1 %}{{ request.path }}{% else %}?page={{ page_obj.previous_page_number }}{% endif %}"
+                                   aria-label="{% translate "Previous page" %}">&lsaquo;</a>
                             {% endif %}
-                            <span class="text black">{{ page_obj.number }} / {{ page_obj.paginator.num_pages }}</span>
+                            {% for number in page_range %}
+                                {% if number == page_obj.paginator.ELLIPSIS %}
+                                    <span class="pagination__gap" aria-hidden="true">{{ number }}</span>
+                                {% elif number == page_obj.number %}
+                                    <a class="btn btn-solid pagination__page" aria-current="page"
+                                       href="{% if number == 1 %}{{ request.path }}{% else %}?page={{ number }}{% endif %}">{{ number }}</a>
+                                {% else %}
+                                    <a class="btn btn-ghost pagination__page"
+                                       href="{% if number == 1 %}{{ request.path }}{% else %}?page={{ number }}{% endif %}">{{ number }}</a>
+                                {% endif %}
+                            {% endfor %}
                             {% if page_obj.has_next %}
-                                <a class="btn text" href="?page={{ page_obj.next_page_number }}">{% translate "Next" %}</a>
+                                <a class="btn btn-ghost pagination__step" rel="next"
+                                   href="?page={{ page_obj.next_page_number }}"
+                                   aria-label="{% translate "Next page" %}">&rsaquo;</a>
                             {% endif %}
                         </nav>
                         {% endif %}

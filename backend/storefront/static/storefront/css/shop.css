@@ -1,4 +1,8 @@
-/* Two button variants the design does not ship.
+/* What the storefront needs and the mockup does not ship, dressed for both presentations: the SPA
+   and the server-rendered bot page link this file next to style.css, so a button or a page number
+   looks the same whichever one the visitor got (ADR-0010).
+
+   Two button variants first.
 
    style.css stays the designer's file, so the additions live here. Its only filled button is
    `.btn-grade` / `.button` - the pink-blue gradient - which is right where the designer put it
@@ -56,4 +60,33 @@
 .btn-ghost--light:hover:not(:disabled) {
     background: rgba(255, 255, 255, .15);
     border-color: var(--white);
+}
+
+
+/* Numbered pagination - components/storefront/Pagination.vue and the block at the end of
+   storefront/catalog.html render the same markup. */
+.pagination {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 30px;
+}
+
+.pagination__page,
+.pagination__step {
+    min-width: 40px;
+    padding: 8px 12px;
+    text-align: center;
+    line-height: 1.2;
+}
+
+.pagination__step {
+    font-size: 18px;
+}
+
+.pagination__gap {
+    padding: 0 2px;
+    color: rgba(0, 0, 0, .4);
 }

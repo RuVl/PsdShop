@@ -422,22 +422,19 @@ string `seo.x_default` puts in `<head>`, so the two presentations advertise one 
 rendered by Django so its `Sitemap:` line is built from `django_site` + `SITE_SCHEME` like every
 other absolute link.
 
-**The grid pages in both directions.** `Catalog.vue` holds a range of pages, not one: arriving at
-`?page=5` loads that page and offers "load previous" above the grid, and both that block and the
-one below it are IntersectionObserver targets - scrolling either way keeps loading, the buttons are
-the fallback for when the observer does not fire. Prepending restores the scroll position, and a
-`?page=` past the end lands on the last real page instead of "page not found" (the API answers 404
-both for an overshoot and for an unknown slug; asking for page 1 tells the two apart). The URL
-keeps the last loaded page, so a bot on the same address sees the same set. **Arriving at a deep
-page anchors one card**: the first card of the page asked for is put under the fixed header and
-held there, frame by frame, until the layout stops moving or the reader touches the page - the
-anchor is a card and not the grid, because the grid's top climbs with every page prepended above
-it. Every scroll this view makes is `behavior: "instant"` (`style.css` sets `scroll-behavior:
-smooth` on `<html>`, and an animated scroll dies on the reader's first wheel), and the restore
-after a prepend is measured against the card the reader was on, not against the document height.
-**Upward loading is driven by the scroll direction**, not by the observer: after a prepend the
-"load previous" block is unavoidably on screen, so an observer would cascade the whole catalog in;
-one page per approach, and only once the reader has moved the page themselves.
+**The grid shows one page, and the address says which.** `Catalog.vue` reads `?page=` and asks the
+API for exactly that page; `components/storefront/Pagination.vue` draws numbered links (first, last
+and a window around the current page, gaps elided) and `storefront/catalog.html` renders the same
+set at the same addresses, so a crawler reaches page 6 from page 1. Page 1 carries no parameter -
+that is the listing's canonical address. A `?page=` past the end lands on the last real page
+instead of "page not found" (the API answers 404 both for an overshoot and for an unknown slug;
+asking for page 1 tells the two apart, and the URL is corrected with it). Changing page scrolls the
+first card under the fixed header with `behavior: "instant"` - `style.css` sets `scroll-behavior:
+smooth` on `<html>`, and an animated scroll lands late and dies on the reader's first wheel;
+landing on page 1 is left at the top of the document, where the hero and the slider are.
+**Infinite scroll used to live here** and was removed: a range of pages needed a scroll anchor, two
+observers and a guess at the reader's direction, and it still left `?page=` describing something
+other than what was on screen (see `docs/journal.md`).
 
 **The product search is the server's** (`?q=` on `/api/catalog/products/`, `ProductQuerySet.search`
 over `name_en`/`name_ru`, capped at `MAX_SEARCH_LENGTH`). It lives in `?q=` in the storefront URL
@@ -445,11 +442,13 @@ too, so a reload or a shared link keeps it, and every facet link carries it over
 the loaded cards in `app.js`; doing that here counted the pagination against the whole catalog, so
 the grid offered a "load more" that added nothing visible. A new query starts at page 1.
 
-**Two button variants are ours, the rest are the design's.** `src/assets/buttons.css` (imported
-from `assets/main.css`) adds `.btn-ghost` and `.btn-solid` on top of the design's `.btn`, plus
-`.btn-ghost--light` for the purple slide. The design's only filled button is the pink-blue gradient
-(`.btn-grade` / `.button`), which stays where the designer put it - the hero and the product cards -
-and was too loud on "load more" and "pay". `style.css` itself stays a copy of the mockup.
+**What the mockup does not ship lives in `storefront/css/shop.css`**, next to `style.css` and
+linked by **both** presentations (`storefront/base.html` and `frontend/index.html`), so a button or
+a page number looks the same whichever one the visitor got: `.btn-ghost` / `.btn-solid` on top of
+the design's `.btn` (plus `.btn-ghost--light` for the purple slide) and the `.pagination` block.
+The design's only filled button is the pink-blue gradient (`.btn-grade` / `.button`), which stays
+where the designer put it - the hero and the product cards - and was too loud on "pay" and on a
+page number. `style.css` itself stays a copy of the mockup.
 
 **The header is `position: fixed` over a light page**, so `App.vue` ports the design's scroll
 handler: `header-scrolled` paints it black past the first pixel and `out` slides it away while the

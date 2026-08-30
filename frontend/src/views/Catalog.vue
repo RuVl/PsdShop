@@ -1,7 +1,8 @@
 <script setup>
-import {computed, nextTick, onBeforeUnmount, onMounted, ref, watch} from 'vue';
+import {computed, nextTick, ref, watch} from 'vue';
 import {useRoute, useRouter} from 'vue-router';
 import CountrySidebar from '@/components/storefront/CountrySidebar.vue';
+import Pagination from '@/components/storefront/Pagination.vue';
 import ProductCard from '@/components/storefront/ProductCard.vue';
 import SlidesCarousel from '@/components/storefront/SlidesCarousel.vue';
 import IconCross from '@/components/icons/IconCross.vue';
@@ -41,39 +42,42 @@ const PAGE_SIZE = 24;
 
 const products = ref([]);
 const count = ref(0);
-// The grid holds a range of pages, not one: a visitor who scrolled to page 7 and reloaded must
-// see the same list, and the pages above it are still reachable.
-const firstPage = ref(1);
-const lastPage = ref(1);
 const state = ref('loading');
-const loadingMore = ref(false);
-const loadingPrevious = ref(false);
 const notFound = ref(false);
 const gridTop = ref(null);
-// Until the reader moves the page themselves, an intersection above the grid is the layout
-// settling (pictures arriving, the grid being pinned), not a scroll upwards - and pulling the
-// previous page in on that would drag them off the page they asked for.
-const readerMoved = ref(false);
-const READER_EVENTS = ['wheel', 'touchstart', 'keydown', 'pointerdown'];
 
+// One page on screen and that page in the address, the way the bot page has always worked.
+// Infinite scroll used to hold a range of pages here; it cost a scroll anchor, two observers and
+// a guess at the reader's direction, and it left `?page=` describing something other than what
+// was on screen.
+const page = computed(() => Math.max(1, Number(route.query.page) || 1));
 const totalPages = computed(() => Math.max(1, Math.ceil(count.value / PAGE_SIZE)));
-const hasNext = computed(() => products.value.length > 0 && lastPage.value < totalPages.value);
-const hasPrevious = computed(() => firstPage.value > 1);
 
 // What the grid is showing, as the API takes it. The search rides along with the facets: it is
-// the server that filters, so the counts the buttons read stay honest.
+// the server that filters, so the count the pagination reads stays honest.
 function facetParams() {
     return {country: countrySlug.value, type: typeSlug.value, q: searchQuery.value};
 }
 
-function facetKey() {
-    return `${route.params.country || 'all'}/${route.params.type || 'all'}/${route.query.q || ''}`;
+function gridKey() {
+    return `${route.params.country || 'all'}/${route.params.type || 'all'}/${route.query.q || ''}/${page.value}`;
 }
 
-async function loadFirst(target) {
+// The address of a page of this listing: everything else in the query stays, and page 1 carries
+// no parameter at all - that is the canonical address of the listing.
+function pageRoute(number) {
+    const query = {...route.query};
+    if (number > 1) query.page = String(number);
+    else delete query.page;
+
+    return {query};
+}
+
+async function load() {
     state.value = 'loading';
     notFound.value = false;
     const facet = facetParams();
+    const target = page.value;
 
     try {
         let data;
@@ -82,31 +86,20 @@ async function loadFirst(target) {
         } catch (error) {
             // The API answers 404 both for an unknown country/type slug and for a page past the
             // end. Asking for the first page tells the two apart: if it answers, the listing
-            // exists and the reader simply overshot - land them on the last real page instead of
-            // a dead end, which is what `?page=999` used to look like.
+            // exists and the reader simply overshot - send them to the last real page instead of
+            // a dead end, address included, so a reload shows the same grid.
             if (error.response?.status !== 404 || target <= 1) throw error;
 
             data = await fetchProducts({...facet, page: 1});
-            target = Math.max(1, Math.ceil(data.count / PAGE_SIZE));
-            if (target > 1) data = await fetchProducts({...facet, page: target});
+            router.replace(pageRoute(Math.max(1, Math.ceil(data.count / PAGE_SIZE))));
+            return;
         }
 
         count.value = data.count;
         products.value = data.results;
-        firstPage.value = target;
-        lastPage.value = target;
         state.value = 'ready';
-        syncPageInUrl();
-
-        // Arriving at `?page=5` used to land at the very top of the document, with the products
-        // somewhere below the fold - the reader had to scroll down to them before scrolling back
-        // up made sense. Put the cards at the top of the screen instead. The scroll stops at the
-        // grid rather than at the whole block, so "load previous" stays just above the fold and
-        // nothing loads itself until the reader actually moves up.
-        if (target > 1) {
-            await nextTick();
-            anchorGrid();
-        }
+        await nextTick();
+        scrollToGrid();
     } catch (error) {
         // Still a 404 with the first page asked for: this country or type does not exist.
         if (error.response?.status === 404) notFound.value = true;
@@ -114,77 +107,31 @@ async function loadFirst(target) {
     }
 }
 
-async function loadMore() {
-    if (loadingMore.value || state.value !== 'ready' || !hasNext.value) return;
-    loadingMore.value = true;
-    try {
-        const next = lastPage.value + 1;
-        const data = await fetchProducts({...facetParams(), page: next});
-        count.value = data.count;
-        products.value = [...products.value, ...data.results];
-        lastPage.value = next;
-        syncPageInUrl();
-    } catch {
-        // Nothing more to add: stop offering the button rather than shouting at the reader.
-        count.value = products.value.length;
-    } finally {
-        loadingMore.value = false;
-    }
-}
+// Landing on the front page belongs at the top of the document - the hero and the slider are part
+// of it. Every page change after that belongs at the cards, under the fixed header.
+let firstLoad = true;
 
-async function loadPrevious({auto = false} = {}) {
-    if (auto && !readerMoved.value) return;
-    if (loadingPrevious.value || state.value !== 'ready' || !hasPrevious.value) return;
-    loadingPrevious.value = true;
-    // Measured against one card, not against the document height: the card is the thing the
-    // reader is looking at, and it stays put even if something else on the page changes size
-    // while the request is in flight.
-    const anchorCard = gridTop.value?.firstElementChild ?? null;
-    const anchorBefore = anchorCard?.getBoundingClientRect().top ?? 0;
-    try {
-        const previous = firstPage.value - 1;
-        const data = await fetchProducts({...facetParams(), page: previous});
-        count.value = data.count;
-        products.value = [...data.results, ...products.value];
-        firstPage.value = previous;
-        // Prepending moves everything down; put the card the reader was on back where it was.
-        await nextTick();
-        if (anchorCard?.isConnected) {
-            scrollToTop(window.scrollY + anchorCard.getBoundingClientRect().top - anchorBefore);
-        }
-    } catch {
-        firstPage.value = 1;
-    } finally {
-        loadingPrevious.value = false;
-    }
-}
+const READER_EVENTS = ['wheel', 'touchstart', 'keydown', 'pointerdown'];
 
-// Every scroll this view makes is instant on purpose: style.css puts `scroll-behavior: smooth`
-// on <html>, and an animated scroll is both slow to land and cancelled by the reader's first
-// wheel - which is how a deep page kept ending up back at the top.
-function scrollToTop(top) {
-    window.scrollTo({top: Math.max(0, Math.round(top)), behavior: 'instant'});
-}
+function scrollToGrid() {
+    const landing = firstLoad && page.value === 1;
+    firstLoad = false;
+    if (landing || !gridTop.value) return;
 
-// Where a card should sit: just under the fixed header, which would otherwise cover it.
-function cardAnchorTop(node) {
-    if (!node?.isConnected) return null;
-
-    const header = document.querySelector('.header')?.getBoundingClientRect().height ?? 0;
-    return window.scrollY + node.getBoundingClientRect().top - header - 16;
-}
-
-// One scroll is not enough to land on a deep page: the hero and the slide above the grid get
-// their pictures after the first paint, the browser restores its own scroll position on a
-// reload, and both move the grid out from under the reader. Re-pin every frame until the layout
-// stops moving - and step aside the moment the reader touches the page.
-function anchorGrid() {
-    // The anchor is the first card of the page that was asked for, not the grid container: the
-    // container's top climbs with every page prepended above it, and pinning that dragged the
-    // reader back up into "load previous" over and over.
-    const card = gridTop.value?.firstElementChild ?? null;
+    const card = gridTop.value.firstElementChild;
     if (!card) return;
 
+    // `behavior: "instant"` on purpose: style.css puts `scroll-behavior: smooth` on <html>, and an
+    // animated scroll both lands late and dies on the reader's first wheel.
+    const pin = () => {
+        const header = document.querySelector('.header')?.getBoundingClientRect().height ?? 0;
+        const top = Math.max(0, Math.round(window.scrollY + card.getBoundingClientRect().top - header - 16));
+        if (Math.abs(window.scrollY - top) > 1) window.scrollTo({top, behavior: 'instant'});
+    };
+
+    // One scroll is not enough on a cold cache: the hero and the slide above the grid get their
+    // pictures after the first paint and push the cards down again. Hold the card in place for a
+    // moment, and step aside as soon as the reader touches the page.
     let released = false;
     const release = () => {
         released = true;
@@ -192,110 +139,18 @@ function anchorGrid() {
     };
     for (const event of READER_EVENTS) window.addEventListener(event, release, {passive: true});
 
-    const deadline = performance.now() + 2000;
+    const deadline = performance.now() + 1500;
     const step = () => {
-        if (released) return;
+        if (released || !card.isConnected) return release();
 
-        const top = cardAnchorTop(card);
-        if (top === null) return release();
-        if (Math.abs(window.scrollY - top) > 1) scrollToTop(top);
-
+        pin();
         if (performance.now() < deadline) requestAnimationFrame(step);
         else release();
     };
     step();
 }
 
-// The URL keeps the last loaded page, so a reload or a shared link lands on the same grid a bot
-// would be served at `?page=N`.
-function syncPageInUrl() {
-    const query = {...route.query};
-    if (lastPage.value > 1) query.page = String(lastPage.value);
-    else delete query.page;
-
-    if ((route.query.page || '') !== (query.page || '')) router.replace({query});
-}
-
-watch(
-    () => facetKey(),
-    () => {
-        products.value = [];
-        loadFirst(Number(route.query.page) || 1);
-    },
-    {immediate: true},
-);
-
-// Downward the grid loads itself when the line under it comes into view; upward it waits for the
-// reader to actually be moving up (onScroll below), because an observer only reports that the
-// block is on screen - which it is, unavoidably, right after a prepend puts the reader back where
-// they were. Both buttons stay, for a browser (or a moment) where neither signal arrives.
-const loadMoreBlock = ref(null);
-const loadPreviousBlock = ref(null);
-let observer = null;
-
-// A record is a photograph of a past frame. Landing on `?page=5` renders a short page - no
-// images yet - so "load previous" starts on screen, is photographed there, and the record is
-// delivered after the grid has already been scrolled into place. Ask the element where it is now.
-function onScreen(node) {
-    if (!node) return false;
-    const rect = node.getBoundingClientRect();
-    return rect.bottom > 0 && rect.top < window.innerHeight;
-}
-
-// Scrolling up is watched here rather than left to the observer alone. On a deep entry the
-// "load previous" block is already on screen behind the anchored grid, so the observer reports it
-// once - before the reader has moved, when we must ignore it - and, its state never changing
-// again, never reports it a second time. A scroll event carries the one thing missing: which way
-// the reader is going.
-let lastScrollY = 0;
-// One page per approach: the block has to leave the screen again before it can pull another one
-// in by itself. Without that the restore after a prepend lands the reader next to the block again
-// and the pages above cascade in.
-let previousArmed = true;
-
-function onScroll() {
-    const y = window.scrollY;
-    const up = y < lastScrollY;
-    lastScrollY = y;
-
-    if (!onScreen(loadPreviousBlock.value)) previousArmed = true;
-    else if (up) maybeLoadPrevious();
-}
-
-// The one gate every automatic upward load goes through, so a refused attempt does not spend the
-// arming.
-function maybeLoadPrevious() {
-    if (!previousArmed || !readerMoved.value || !onScreen(loadPreviousBlock.value)) return;
-
-    previousArmed = false;
-    loadPrevious({auto: true});
-}
-
-onMounted(() => {
-    const moved = () => { readerMoved.value = true; };
-    for (const event of READER_EVENTS) window.addEventListener(event, moved, {passive: true});
-    lastScrollY = window.scrollY;
-    window.addEventListener('scroll', onScroll, {passive: true});
-    onBeforeUnmount(() => {
-        for (const event of READER_EVENTS) window.removeEventListener(event, moved);
-        window.removeEventListener('scroll', onScroll);
-    });
-
-    observer = new IntersectionObserver(entries => {
-        for (const entry of entries) {
-            if (!entry.isIntersecting || !onScreen(entry.target)) continue;
-            if (entry.target === loadMoreBlock.value) loadMore();
-        }
-    });
-
-    for (const element of [loadMoreBlock]) {
-        watch(element, (node, previous) => {
-            if (previous) observer.unobserve(previous);
-            if (node) observer.observe(node);
-        }, {immediate: true});
-    }
-});
-onBeforeUnmount(() => observer?.disconnect());
+watch(() => gridKey(), load, {immediate: true});
 
 // The search lives in the URL (`?q=`), and the URL is what the grid loads from - the field below
 // is only the way a reader edits it.
@@ -410,27 +265,13 @@ function catalogTarget(country, type) {
               <p v-if="state === 'loading'" class="text black">{{ $t('products.loading') }}</p>
               <p v-else-if="state === 'failed'" class="text black">{{ $t('products.error') }}</p>
               <template v-else>
-                <div v-if="hasPrevious" ref="loadPreviousBlock" class="load-more load-more--previous">
-                  <button class="btn btn-big btn-ghost" type="button" :disabled="loadingPrevious"
-                          @click="loadPrevious">
-                    {{ loadingPrevious ? $t('products.loading') : $t('storefront.grid.load_previous') }}
-                  </button>
-                </div>
-
                 <div ref="gridTop" class="products-list">
                   <ProductCard v-for="product in products" :key="product.id" :product="product"
                                :type-name="typeNames[product.document_type] || ''"/>
                   <p v-if="!products.length" class="text black">{{ $t('storefront.grid.empty') }}</p>
                 </div>
 
-                <div v-if="hasNext" class="load-more">
-                  <button class="btn btn-big btn-ghost" type="button" :disabled="loadingMore" @click="loadMore">
-                    {{ loadingMore ? $t('products.loading') : $t('storefront.grid.load_more') }}
-                  </button>
-                </div>
-                <!-- The observer watches this line, not the button: the button stays a button, and
-                     a reader who scrolls here gets the next page without pressing it. -->
-                <div v-if="hasNext" ref="loadMoreBlock" class="load-more-sentinel" aria-hidden="true"></div>
+                <Pagination :page="page" :total-pages="totalPages" :to="pageRoute"/>
               </template>
             </div>
           </div>
@@ -517,21 +358,5 @@ function catalogTarget(country, type) {
 .filter-products-btn.current {
   color: var(--primary);
   font-weight: var(--bold);
-}
-
-.load-more {
-  display: flex;
-  justify-content: center;
-  margin-top: 24px;
-}
-
-.load-more--previous {
-  margin: 0 0 24px;
-}
-
-/* Zero-height trigger below the button: the observer fires slightly before the reader arrives. */
-.load-more-sentinel {
-  height: 1px;
-  margin-top: 120px;
 }
 </style>
