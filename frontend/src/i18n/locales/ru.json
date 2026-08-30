@@ -90,6 +90,7 @@
     },
     "filter": {
       "all_categories": "Все категории",
+      "reset": "Сбросить фильтр",
       "title": "Фильтр по товарам"
     },
     "footer": {
@@ -114,9 +115,11 @@
       "title": "Карточка товара"
     },
     "search": {
+      "clear": "Очистить поиск",
       "country_placeholder": "Поиск по стране",
       "products": "Поиск по товарам",
-      "products_placeholder": "Введите название товара"
+      "products_placeholder": "Введите название товара",
+      "submit": "Искать"
     },
     "sidebar": {
       "all": "Все категории",

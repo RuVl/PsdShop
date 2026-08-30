@@ -90,6 +90,7 @@
     },
     "filter": {
       "all_categories": "All categories",
+      "reset": "Reset the filter",
       "title": "Filter products"
     },
     "footer": {
@@ -114,9 +115,11 @@
       "title": "Product card"
     },
     "search": {
+      "clear": "Clear the search",
       "country_placeholder": "Search by country",
       "products": "Search products",
-      "products_placeholder": "Enter a product name"
+      "products_placeholder": "Enter a product name",
+      "submit": "Search"
     },
     "sidebar": {
       "all": "All categories",

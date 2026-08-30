@@ -17,11 +17,14 @@ export async function fetchDocumentTypes() {
     return data.map(item => new DocumentType(item));
 }
 
-export async function fetchProducts({country, type, page} = {}) {
+export async function fetchProducts({country, type, page, q} = {}) {
     const params = {};
     if (country && country !== 'all') params.country = country;
     if (type && type !== 'all') params.type = type;
     if (page && page > 1) params.page = page;
+    // The search is the server's: filtering the loaded pages alone would count the pagination
+    // against the whole catalog and offer a "load more" that adds nothing to what is shown.
+    if (q) params.q = q;
 
     const {data} = await api.get('/catalog/products/', {params});
     return {count: data.count, results: data.results.map(item => new Product(item))};

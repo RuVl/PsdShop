@@ -22,9 +22,17 @@ const visibleCountries = computed(() => {
     return catalogStore.countries.filter(country => country.name.toLowerCase().includes(query));
 });
 
+// "All countries" is the way out of a selection, so it has to read as one of the rows: the same
+// icon slot and the same count, which here is everything on the shelf.
+const totalProducts = computed(() =>
+    catalogStore.countries.reduce((sum, country) => sum + (country.products_count || 0), 0),
+);
+
 function target(country) {
-    if (country === 'all' && props.typeSlug === 'all') return {name: 'home', params: {lang: lang.value}};
-    return {name: 'catalog', params: {lang: lang.value, country, type: props.typeSlug}};
+    // The product search is carried over: picking a country narrows the same search.
+    const query = route.query.q ? {q: route.query.q} : {};
+    if (country === 'all' && props.typeSlug === 'all') return {name: 'home', params: {lang: lang.value}, query};
+    return {name: 'catalog', params: {lang: lang.value, country, type: props.typeSlug}, query};
 }
 </script>
 
@@ -60,7 +68,9 @@ function target(country) {
         <ul class="categories__list">
           <li class="categories__item" :class="{current: countrySlug === 'all'}">
             <router-link :to="target('all')">
+              <span class="categories__item-icon" aria-hidden="true">🌐</span>
               <span class="categories__item-title text black">{{ $t('storefront.sidebar.all_countries') }}</span>
+              <span class="categories__item-count badge text-small primary">{{ totalProducts }}</span>
             </router-link>
           </li>
           <li v-for="country in visibleCountries" :key="country.slug"
@@ -76,3 +86,24 @@ function target(country) {
     </div>
   </div>
 </template>
+
+<style scoped>
+/* The design's rows carry a 23px flag image; ours is an emoji in a span, which inherits the body
+   size and lines the rows up unevenly. */
+.categories__item-icon {
+  font-size: 20px;
+  line-height: 1;
+}
+
+/* Which country is selected was invisible: `.current` is set here and in the filter chips, and
+   style.css only styles it inside the design's own dropdown. Without this there is nothing to
+   tell the reader they are filtered, and so nothing to suggest clearing it. */
+.categories__item.current .categories__item-title {
+  color: var(--primary);
+}
+
+.categories__item.current .categories__item-count {
+  color: var(--white);
+  background: var(--primary);
+}
+</style>
