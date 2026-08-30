@@ -5,12 +5,19 @@ import {storeToRefs} from 'pinia';
 import CheckoutModal from '@/components/storefront/CheckoutModal.vue';
 import IconTrash from '@/components/icons/IconTrash.vue';
 import {useCartStore} from '@/stores/cart.js';
+import {useCatalogStore} from '@/stores/catalog.js';
 
 // The cart itself lives in localStorage (ADR-0010) - this page is its view, drawn with the
 // design's storefront classes. A line is a catalog card payload: no quantities, USD only.
 const route = useRoute();
 const cartStore = useCartStore();
 const {cartItems, cartItemCount, totalPrice} = storeToRefs(cartStore);
+
+// A card payload names its country and type by slug; the flag and the names live on the catalog
+// rows, which is where the grid card reads them from too.
+const catalogStore = useCatalogStore();
+catalogStore.load();
+const typeNames = computed(() => Object.fromEntries(catalogStore.documentTypes.map(t => [t.slug, t.name])));
 
 const lang = computed(() => route.params.lang || 'en');
 
@@ -52,12 +59,24 @@ onMounted(async () => {
               </div>
 
               <div class="cart__body">
+                <div class="cart__badges">
+                  <span v-if="typeNames[item.document_type]" class="badge text-small primary">
+                    {{ typeNames[item.document_type] }}
+                  </span>
+                  <span v-if="item.year" class="badge-year text-small">{{ item.year }}</span>
+                </div>
                 <!-- The whole row opens the product: this link is stretched over the card by
                      .cart__title::after, and the delete button is lifted above it. -->
                 <router-link class="cart__title text black" :to="item.route(lang)">{{ item.name }}</router-link>
-                <div class="cart__price text-small">
-                  {{ $t('cart_view.cost') }}: <span class="primary">{{ item.priceLabel }}</span>
+                <div v-if="catalogStore.countryBySlug(item.country)" class="cart__country text-small">
+                  <span aria-hidden="true">{{ catalogStore.countryBySlug(item.country).flag }}</span>
+                  {{ catalogStore.countryBySlug(item.country).name }}
                 </div>
+              </div>
+
+              <div class="cart__prop">
+                <div class="cart__prop-label text-small">{{ $t('cart_view.cost') }}</div>
+                <div class="cart__prop-value primary">{{ item.priceLabel }}</div>
               </div>
 
               <button class="cart__remove" type="button" :title="$t('buttons.delete')"
@@ -71,13 +90,15 @@ onMounted(async () => {
             <div class="cart__total text-mid black">
               {{ $t('cart_view.total') }}: <span class="primary">${{ totalPrice.toFixed(2) }}</span>
             </div>
-            <button class="button" type="button" @click="paying = true">{{ $t('buttons.pay') }}</button>
+            <button class="btn btn-big btn-solid" type="button" @click="paying = true">{{ $t('buttons.pay') }}</button>
           </div>
         </template>
 
         <div v-else class="cart__empty">
           <p class="text black">{{ $t('cart_view.empty') }}</p>
-          <router-link class="button" :to="{name: 'home', params: {lang}}">{{ $t('buttons.to_catalog') }}</router-link>
+          <router-link class="btn btn-big btn-ghost" :to="{name: 'home', params: {lang}}">
+            {{ $t('buttons.to_catalog') }}
+          </router-link>
         </div>
       </div>
     </section>
@@ -101,10 +122,13 @@ onMounted(async () => {
   padding: 0;
 }
 
-/* The card of the mockup's basket row: white, soft shadow, 15px radius. */
+/* The card of the mockup's basket row: white, soft shadow, 15px radius. The columns are the ones
+   a grid card has - picture, what it is, what it costs - so the eye reads the two the same way. */
 .cart__item {
   position: relative;
-  display: flex;
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr) auto auto;
+  grid-template-areas: 'preview body prop remove';
   align-items: center;
   gap: 20px;
   width: 100%;
@@ -122,7 +146,7 @@ onMounted(async () => {
 /* A fixed box, cropped like the grid card does it: uploads are not one shape, and a portrait
    scan used to stretch its row to three times the height of its neighbours. */
 .cart__preview {
-  flex: 0 0 auto;
+  grid-area: preview;
   width: 72px;
   height: 72px;
   overflow: hidden;
@@ -138,15 +162,22 @@ onMounted(async () => {
 }
 
 .cart__body {
-  flex: 1;
+  grid-area: body;
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 6px;
+}
+
+.cart__badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
 }
 
 .cart__title {
   color: #2c2045;
+  font-weight: var(--bold);
   overflow-wrap: anywhere;
   transition: color .3s ease;
 }
@@ -164,14 +195,31 @@ onMounted(async () => {
   color: #6238f0;
 }
 
-.cart__price .primary {
-  font-weight: 600;
+.cart__country {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: rgba(0, 0, 0, .5);
+}
+
+.cart__prop {
+  grid-area: prop;
+  text-align: right;
+}
+
+.cart__prop-label {
+  color: rgba(0, 0, 0, .5);
+}
+
+.cart__prop-value {
+  font-weight: var(--bold);
+  white-space: nowrap;
 }
 
 .cart__remove {
+  grid-area: remove;
   position: relative;
   z-index: 1;
-  flex: 0 0 auto;
   width: 36px;
   height: 36px;
   display: flex;
@@ -216,11 +264,29 @@ onMounted(async () => {
   margin-top: 25px;
 }
 
+/* On a phone the price moves under the name instead of squeezing the columns to nothing. */
 @media (max-width: 560px) {
   .cart__item {
-    flex-wrap: wrap;
-    gap: 15px;
+    grid-template-columns: 56px minmax(0, 1fr) auto;
+    grid-template-areas:
+      'preview body remove'
+      'prop prop prop';
+    /* The row is two lines tall here; a centred picture would float in the middle of them. */
+    align-items: start;
+    gap: 12px 15px;
     padding: 15px;
+  }
+
+  .cart__preview {
+    width: 56px;
+    height: 56px;
+  }
+
+  .cart__prop {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    text-align: left;
   }
 
   .cart__footer {
@@ -228,7 +294,7 @@ onMounted(async () => {
     align-items: stretch;
   }
 
-  .cart__footer .button {
+  .cart__footer .btn {
     width: 100%;
   }
 }
