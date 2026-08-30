@@ -50,6 +50,20 @@ DESCRIPTION_RU = (
 
 PLACEHOLDER_FILE = b"PsdShop test file - not a real template.\n"
 
+# Rough flags for the seed previews - enough to tell one card from another at a glance, drawn as
+# bands (`h` across, `v` down) plus an optional canton. Not a flag library: a country the seed
+# does not list gets its code on plain cloth.
+FLAGS = {
+    "us": ("h", [(178, 34, 52), (255, 255, 255)] * 3, (60, 59, 110)),
+    "gb": ("v", [(1, 33, 105), (255, 255, 255), (200, 16, 46), (255, 255, 255), (1, 33, 105)], None),
+    "de": ("h", [(0, 0, 0), (221, 0, 0), (255, 206, 0)], None),
+    "fr": ("v", [(0, 85, 164), (255, 255, 255), (239, 65, 53)], None),
+    "es": ("h", [(198, 11, 30), (255, 196, 0), (198, 11, 30)], None),
+    "it": ("v", [(0, 140, 69), (255, 255, 255), (205, 33, 42)], None),
+    "pl": ("h", [(255, 255, 255), (220, 20, 60)], None),
+    "pt": ("v", [(0, 102, 71), (218, 41, 28)], None),
+}
+
 
 class Command(BaseCommand):
     help = "Seed the catalog with countries, document types and products for manual testing."
@@ -295,6 +309,44 @@ class Command(BaseCommand):
 
         return len(cases)
 
+    def _draw_stamp(self, canvas, draw, product: Product):
+        """A big flag and a big red number in the middle of the placeholder."""
+
+        from PIL import ImageFont
+
+        width, height = canvas.size
+        flag_w = int(min(width, height) * 0.42)
+        flag_h = int(flag_w * 2 / 3)
+        left = (width - flag_w) // 2
+        top = (height - flag_h) // 2 - int(flag_h * 0.25)
+
+        direction, bands, canton = FLAGS.get(product.country.code.lower(), ("h", [(220, 224, 232)], None))
+        for index, colour in enumerate(bands):
+            if direction == "h":
+                y0 = top + flag_h * index // len(bands)
+                y1 = top + flag_h * (index + 1) // len(bands)
+                draw.rectangle((left, y0, left + flag_w, y1), fill=colour)
+            else:
+                x0 = left + flag_w * index // len(bands)
+                x1 = left + flag_w * (index + 1) // len(bands)
+                draw.rectangle((x0, top, x1, top + flag_h), fill=colour)
+
+        if canton:
+            draw.rectangle((left, top, left + flag_w * 2 // 5, top + flag_h * 7 // 13), fill=canton)
+
+        draw.rectangle((left, top, left + flag_w, top + flag_h), outline=(60, 70, 90), width=max(1, flag_w // 80))
+
+        # The number is the product id: two cards of the same country and year still differ.
+        label = str(product.pk)
+        font = ImageFont.load_default(size=max(24, int(flag_h * 0.7)))
+        box = draw.textbbox((0, 0), label, font=font)
+        draw.text(
+            ((width - (box[2] - box[0])) // 2 - box[0], top + flag_h + int(flag_h * 0.12) - box[1]),
+            label,
+            font=font,
+            fill=(214, 32, 48),
+        )
+
     def _add_images(self, product: Product, count: int):
         """Generate flat placeholder images so the card, the gallery and the resizer all have work."""
 
@@ -324,6 +376,9 @@ class Command(BaseCommand):
             border = (inset, inset, width - inset, height - inset)
             draw.rectangle(border, outline=(120, 130, 150), width=inset // 4 or 1)
             draw.text((inset * 2, inset * 2), f"{product.name_en}\n{shape} {width}x{height}", fill=(40, 50, 70))
+            # A frame and a caption look the same from across the grid. The flag and the number in
+            # the middle are what make one card tell itself apart from the next.
+            self._draw_stamp(canvas, draw, product)
 
             buffer = BytesIO()
             canvas.save(buffer, format="PNG")

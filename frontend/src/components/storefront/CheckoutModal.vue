@@ -173,12 +173,36 @@ onBeforeUnmount(() => {
   height: 12px;
 }
 
+/* The design's props block is a centred, wrapping row of two-word columns - with a list of
+   purchases every line found its own place and the prices never lined up. One line per row: the
+   name takes the space it needs on the left, the price stays on the right edge. */
+.modal-buy__props {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+  /* The design's 316px was for a pair of short props; a purchase list uses the modal's width, the
+     same as the e-mail field under it. */
+  width: 100%;
+}
+
 .buy-modal__line {
   width: 100%;
   flex-direction: row;
   align-items: baseline;
   justify-content: space-between;
   gap: 12px;
+}
+
+.buy-modal__line .modal-buy__props_label {
+  flex: 1;
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+
+.buy-modal__line .modal-buy__props_value {
+  flex: none;
+  text-align: right;
+  white-space: nowrap;
 }
 
 .buy-modal__error {

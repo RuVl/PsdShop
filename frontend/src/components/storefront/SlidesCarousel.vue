@@ -29,7 +29,8 @@ onBeforeUnmount(stop);
         <div class="slider-welcome-angle-left"></div>
         <div class="slider-welcome-angle-right"></div>
         <div class="swiper-wrapper">
-          <div v-for="(slide, index) in slides" :key="index" v-show="index === current" class="swiper-slide">
+          <div v-for="(slide, index) in slides" :key="index" class="swiper-slide"
+               :class="{'swiper-slide--current': index === current}" :aria-hidden="index !== current">
             <div class="content">
               <div class="content__block">
                 <div class="content__title title white">{{ slide.title }}</div>
@@ -72,6 +73,23 @@ onBeforeUnmount(stop);
   overflow: hidden;
 }
 
+/* The box keeps one size whatever slide is showing, the way the design does it - swiper measured
+   the tallest slide on init and pinned the container to it (design/app.js). Stacking every slide
+   in one grid cell gets the same height with no measuring: the row is as tall as the tallest
+   slide, and the ones not showing keep their space instead of collapsing the banner. */
+.swiper-wrapper {
+  display: grid;
+}
+
+.swiper-slide {
+  grid-area: 1 / 1;
+  visibility: hidden;
+}
+
+.swiper-slide--current {
+  visibility: visible;
+}
+
 .swiper-button-prev,
 .swiper-button-next {
   position: absolute;
@@ -98,24 +116,16 @@ onBeforeUnmount(stop);
   padding-bottom: 26px;
 }
 
-/* Over the slide, not under it, and inside .content's own 101px padding so the dots never land
-   on the picture on the right. */
+/* Over the slide, not under it, and centred across it. */
 .slider-welcome-dots {
   position: absolute;
-  left: 101px;
+  left: 0;
+  right: 0;
   bottom: 14px;
   z-index: 2;
   display: flex;
+  justify-content: center;
   gap: 8px;
-}
-
-/* Below 880px .content stacks and centres itself; the dots follow it. */
-@media (max-width: 880px) {
-  .slider-welcome-dots {
-    left: 0;
-    right: 0;
-    justify-content: center;
-  }
 }
 
 .slider-welcome-dot {

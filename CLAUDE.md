@@ -429,10 +429,15 @@ the fallback for when the observer does not fire. Prepending restores the scroll
 `?page=` past the end lands on the last real page instead of "page not found" (the API answers 404
 both for an overshoot and for an unknown slug; asking for page 1 tells the two apart). The URL
 keeps the last loaded page, so a bot on the same address sees the same set. **Arriving at a deep
-page anchors the grid**: the cards are scrolled to the top of the screen and held there while the
-pictures above finish loading (a `ResizeObserver` re-pins until the reader touches the page), and
-"load previous" only pulls a page in **after** the reader has moved the page themselves - otherwise
-the layout settling would drag them off the page they asked for.
+page anchors one card**: the first card of the page asked for is put under the fixed header and
+held there, frame by frame, until the layout stops moving or the reader touches the page - the
+anchor is a card and not the grid, because the grid's top climbs with every page prepended above
+it. Every scroll this view makes is `behavior: "instant"` (`style.css` sets `scroll-behavior:
+smooth` on `<html>`, and an animated scroll dies on the reader's first wheel), and the restore
+after a prepend is measured against the card the reader was on, not against the document height.
+**Upward loading is driven by the scroll direction**, not by the observer: after a prepend the
+"load previous" block is unavoidably on screen, so an observer would cascade the whole catalog in;
+one page per approach, and only once the reader has moved the page themselves.
 
 **The product search is the server's** (`?q=` on `/api/catalog/products/`, `ProductQuerySet.search`
 over `name_en`/`name_ru`, capped at `MAX_SEARCH_LENGTH`). It lives in `?q=` in the storefront URL

@@ -136,17 +136,22 @@ async function loadPrevious({auto = false} = {}) {
     if (auto && !readerMoved.value) return;
     if (loadingPrevious.value || state.value !== 'ready' || !hasPrevious.value) return;
     loadingPrevious.value = true;
-    const heightBefore = document.documentElement.scrollHeight;
-    const scrollBefore = window.scrollY;
+    // Measured against one card, not against the document height: the card is the thing the
+    // reader is looking at, and it stays put even if something else on the page changes size
+    // while the request is in flight.
+    const anchorCard = gridTop.value?.firstElementChild ?? null;
+    const anchorBefore = anchorCard?.getBoundingClientRect().top ?? 0;
     try {
         const previous = firstPage.value - 1;
         const data = await fetchProducts({...facetParams(), page: previous});
         count.value = data.count;
         products.value = [...data.results, ...products.value];
         firstPage.value = previous;
-        // Prepending moves everything down; hold the reader where they were looking.
+        // Prepending moves everything down; put the card the reader was on back where it was.
         await nextTick();
-        window.scrollTo({top: scrollBefore + (document.documentElement.scrollHeight - heightBefore)});
+        if (anchorCard?.isConnected) {
+            scrollToTop(window.scrollY + anchorCard.getBoundingClientRect().top - anchorBefore);
+        }
     } catch {
         firstPage.value = 1;
     } finally {
@@ -154,25 +159,51 @@ async function loadPrevious({auto = false} = {}) {
     }
 }
 
-// Holding the grid at the top of the screen takes more than one scroll: the hero and the slide
-// above it get their pictures after the first paint and push everything down. Keep re-pinning
-// until the layout stops growing, and step aside the moment the reader touches the page.
+// Every scroll this view makes is instant on purpose: style.css puts `scroll-behavior: smooth`
+// on <html>, and an animated scroll is both slow to land and cancelled by the reader's first
+// wheel - which is how a deep page kept ending up back at the top.
+function scrollToTop(top) {
+    window.scrollTo({top: Math.max(0, Math.round(top)), behavior: 'instant'});
+}
+
+// Where a card should sit: just under the fixed header, which would otherwise cover it.
+function cardAnchorTop(node) {
+    if (!node?.isConnected) return null;
+
+    const header = document.querySelector('.header')?.getBoundingClientRect().height ?? 0;
+    return window.scrollY + node.getBoundingClientRect().top - header - 16;
+}
+
+// One scroll is not enough to land on a deep page: the hero and the slide above the grid get
+// their pictures after the first paint, the browser restores its own scroll position on a
+// reload, and both move the grid out from under the reader. Re-pin every frame until the layout
+// stops moving - and step aside the moment the reader touches the page.
 function anchorGrid() {
-    const pin = () => gridTop.value?.scrollIntoView({block: 'start'});
-    pin();
+    // The anchor is the first card of the page that was asked for, not the grid container: the
+    // container's top climbs with every page prepended above it, and pinning that dragged the
+    // reader back up into "load previous" over and over.
+    const card = gridTop.value?.firstElementChild ?? null;
+    if (!card) return;
 
-    const resize = new ResizeObserver(pin);
-    resize.observe(document.body);
-
-    let timer = null;
+    let released = false;
     const release = () => {
-        resize.disconnect();
-        clearTimeout(timer);
+        released = true;
         for (const event of READER_EVENTS) window.removeEventListener(event, release);
     };
-
-    timer = setTimeout(release, 2000);
     for (const event of READER_EVENTS) window.addEventListener(event, release, {passive: true});
+
+    const deadline = performance.now() + 2000;
+    const step = () => {
+        if (released) return;
+
+        const top = cardAnchorTop(card);
+        if (top === null) return release();
+        if (Math.abs(window.scrollY - top) > 1) scrollToTop(top);
+
+        if (performance.now() < deadline) requestAnimationFrame(step);
+        else release();
+    };
+    step();
 }
 
 // The URL keeps the last loaded page, so a reload or a shared link lands on the same grid a bot
@@ -194,8 +225,10 @@ watch(
     {immediate: true},
 );
 
-// Infinite scroll in both directions: the two buttons click themselves when they scroll into
-// view, and stay as the fallback for a browser (or a moment) where the observer does not fire.
+// Downward the grid loads itself when the line under it comes into view; upward it waits for the
+// reader to actually be moving up (onScroll below), because an observer only reports that the
+// block is on screen - which it is, unavoidably, right after a prepend puts the reader back where
+// they were. Both buttons stay, for a browser (or a moment) where neither signal arrives.
 const loadMoreBlock = ref(null);
 const loadPreviousBlock = ref(null);
 let observer = null;
@@ -209,22 +242,53 @@ function onScreen(node) {
     return rect.bottom > 0 && rect.top < window.innerHeight;
 }
 
+// Scrolling up is watched here rather than left to the observer alone. On a deep entry the
+// "load previous" block is already on screen behind the anchored grid, so the observer reports it
+// once - before the reader has moved, when we must ignore it - and, its state never changing
+// again, never reports it a second time. A scroll event carries the one thing missing: which way
+// the reader is going.
+let lastScrollY = 0;
+// One page per approach: the block has to leave the screen again before it can pull another one
+// in by itself. Without that the restore after a prepend lands the reader next to the block again
+// and the pages above cascade in.
+let previousArmed = true;
+
+function onScroll() {
+    const y = window.scrollY;
+    const up = y < lastScrollY;
+    lastScrollY = y;
+
+    if (!onScreen(loadPreviousBlock.value)) previousArmed = true;
+    else if (up) maybeLoadPrevious();
+}
+
+// The one gate every automatic upward load goes through, so a refused attempt does not spend the
+// arming.
+function maybeLoadPrevious() {
+    if (!previousArmed || !readerMoved.value || !onScreen(loadPreviousBlock.value)) return;
+
+    previousArmed = false;
+    loadPrevious({auto: true});
+}
+
 onMounted(() => {
     const moved = () => { readerMoved.value = true; };
     for (const event of READER_EVENTS) window.addEventListener(event, moved, {passive: true});
+    lastScrollY = window.scrollY;
+    window.addEventListener('scroll', onScroll, {passive: true});
     onBeforeUnmount(() => {
         for (const event of READER_EVENTS) window.removeEventListener(event, moved);
+        window.removeEventListener('scroll', onScroll);
     });
 
     observer = new IntersectionObserver(entries => {
         for (const entry of entries) {
             if (!entry.isIntersecting || !onScreen(entry.target)) continue;
             if (entry.target === loadMoreBlock.value) loadMore();
-            if (entry.target === loadPreviousBlock.value) loadPrevious({auto: true});
         }
     });
 
-    for (const element of [loadMoreBlock, loadPreviousBlock]) {
+    for (const element of [loadMoreBlock]) {
         watch(element, (node, previous) => {
             if (previous) observer.unobserve(previous);
             if (node) observer.observe(node);
