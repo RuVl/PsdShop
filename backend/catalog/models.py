@@ -125,6 +125,11 @@ def product_file_storage() -> ProductFilesStorage:
     return ProductFilesStorage()
 
 
+# Longest search string the catalog will look at. Beyond it an `icontains` scan is work no one
+# asked for, and the name it searches is 255 characters long anyway.
+MAX_SEARCH_LENGTH = 100
+
+
 class ProductQuerySet(models.QuerySet):
     def active(self) -> "ProductQuerySet":
         return self.filter(is_active=True)
@@ -133,6 +138,19 @@ class ProductQuerySet(models.QuerySet):
         """Everything a card needs, without a query per row."""
 
         return self.select_related("country", "document_type").prefetch_related("images")
+
+    def search(self, query: str | None) -> "ProductQuerySet":
+        """Free-text filter over the name in both languages - an empty query filters nothing.
+
+        Both columns are searched rather than the active language alone: the payload carries both,
+        so a reader who switched the interface still finds what they typed.
+        """
+
+        query = (query or "").strip()[:MAX_SEARCH_LENGTH]
+        if not query:
+            return self
+
+        return self.filter(models.Q(name_en__icontains=query) | models.Q(name_ru__icontains=query))
 
 
 class Product(MetaTagsMixin):

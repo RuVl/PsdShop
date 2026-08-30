@@ -343,3 +343,79 @@ class CatalogApiTests(CatalogFactoryMixin, TestCase):
     def test_detail_of_inactive_product_is_404(self):
         hidden = self.make_product(slug="hidden", is_active=False)
         self.assertEqual(self.client.get(f"/api/catalog/products/{hidden.pk}/").status_code, 404)
+
+
+class ProductSearchTests(CatalogFactoryMixin, TestCase):
+    """`?q=` on the grid: both languages, literal characters, and a cap on the string."""
+
+    def setUp(self):
+        super().setUp()
+        self.bill = self.make_product(
+            slug="germany-bill", name_en="Germany utility bill 2022", name_ru="Германия счёт 2022"
+        )
+        self.statement = self.make_product(
+            slug="germany-statement", name_en="Germany bank statement", name_ru="Германия банковская выписка"
+        )
+
+    def search(self, query, **params):
+        return self.client.get("/api/catalog/products/", {"q": query, **params}).json()
+
+    def test_finds_by_english_name_whatever_the_case(self):
+        payload = self.search("BANK")
+        self.assertEqual(payload["count"], 1)
+        self.assertEqual(payload["results"][0]["url_slug"], self.statement.url_slug)
+
+    def test_finds_by_russian_name(self):
+        payload = self.search("выписка")
+        self.assertEqual(payload["count"], 1)
+        self.assertEqual(payload["results"][0]["url_slug"], self.statement.url_slug)
+
+    def test_an_empty_query_filters_nothing(self):
+        for query in ["", "   "]:
+            with self.subTest(query=query):
+                self.assertEqual(self.search(query)["count"], 2)
+
+    def test_nothing_found_is_an_empty_page_not_a_404(self):
+        response = self.client.get("/api/catalog/products/", {"q": "atlantis"})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["count"], 0)
+
+    def test_like_wildcards_are_searched_literally(self):
+        discounted = self.make_product(slug="percent", name_en="50% off bill", name_ru="Скидка 50%")
+        self.assertEqual(self.search("%")["results"][0]["url_slug"], discounted.url_slug)
+        # `_` matches one character in LIKE; escaped, it matches nothing here.
+        self.assertEqual(self.search("_")["count"], 0)
+
+    def test_a_long_query_is_cut_instead_of_scanned_whole(self):
+        long_name = "x" * 150
+        wanted = self.make_product(slug="long-name", name_en=long_name, name_ru=long_name)
+        # Only the first 100 characters are looked at, so the tail cannot turn a hit into a miss.
+        payload = self.search("x" * 100 + "y" * 400)
+        self.assertEqual(payload["count"], 1)
+        self.assertEqual(payload["results"][0]["url_slug"], wanted.url_slug)
+
+    def test_search_stacks_with_the_facets(self):
+        other = Country.objects.create(name="Portugal", slug="portugal", code="pt")
+        self.make_product(slug="portugal-bill", name_en="Portugal utility bill", country=other)
+
+        payload = self.search("bill", country="germany", type="utility-bill")
+        self.assertEqual(payload["count"], 1)
+        self.assertEqual(payload["results"][0]["url_slug"], self.bill.url_slug)
+
+    def test_hidden_products_are_not_searchable(self):
+        self.make_product(slug="hidden-bill", name_en="Germany utility bill hidden", is_active=False)
+        self.assertEqual(self.search("utility bill")["count"], 1)
+
+    def test_pagination_counts_the_found_set(self):
+        for index in range(30):
+            self.make_product(
+                slug=f"flood-{index}", name_en=f"Flooded bill {index}", name_ru=f"Затопленный счёт {index}"
+            )
+
+        first = self.search("Flooded")
+        self.assertEqual(first["count"], 30)
+        self.assertEqual(len(first["results"]), 24)
+
+        second = self.search("Flooded", page=2)
+        self.assertEqual(len(second["results"]), 6)
+        self.assertEqual(self.client.get("/api/catalog/products/", {"q": "Flooded", "page": 3}).status_code, 404)
