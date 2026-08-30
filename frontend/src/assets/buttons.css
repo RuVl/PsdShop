@@ -1,0 +1,59 @@
+/* Two button variants the design does not ship.
+
+   style.css stays the designer's file, so the additions live here. Its only filled button is
+   `.btn-grade` / `.button` - the pink-blue gradient - which is right where the designer put it
+   (the hero and the product cards) and too loud everywhere else: a "load more" under a white grid
+   and a "pay" at the end of a list do not both need the loudest button on the page. */
+
+.btn-ghost,
+.btn-solid {
+    font-family: inherit;
+    font-size: 14px;
+    line-height: 1.2;
+    font-weight: var(--bold);
+    text-align: center;
+    text-decoration: none;
+    border-radius: 50px;
+    border: 2px solid transparent;
+    transition: color .3s, background .3s, border-color .3s;
+}
+
+.btn-ghost {
+    color: var(--primary);
+    background: var(--white);
+    border-color: rgba(63, 47, 241, .25);
+}
+
+.btn-ghost:hover:not(:disabled) {
+    background: rgba(63, 47, 241, .06);
+    border-color: var(--primary);
+}
+
+.btn-solid {
+    color: var(--white);
+    background: var(--primary);
+    border-color: var(--primary);
+}
+
+.btn-solid:hover:not(:disabled) {
+    background: var(--link-active);
+    border-color: var(--link-active);
+}
+
+.btn-ghost:disabled,
+.btn-solid:disabled {
+    opacity: .5;
+    cursor: default;
+}
+
+/* The same ghost, read on the purple slide instead of on white. */
+.btn-ghost--light {
+    color: var(--white);
+    background: transparent;
+    border-color: rgba(255, 255, 255, .6);
+}
+
+.btn-ghost--light:hover:not(:disabled) {
+    background: rgba(255, 255, 255, .15);
+    border-color: var(--white);
+}

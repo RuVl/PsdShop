@@ -36,7 +36,7 @@ onBeforeUnmount(stop);
                 <div v-if="slide.text" class="idesc content__text text white">
                   <p>{{ slide.text }}</p>
                 </div>
-                <a v-if="slide.button_label && slide.button_url" class="btn btn-grade text white opacity"
+                <a v-if="slide.button_label && slide.button_url" class="btn btn-big btn-ghost btn-ghost--light"
                    :href="slide.button_url">{{ slide.button_label }}</a>
               </div>
               <picture v-if="slide.image" class="content__img"><img :src="slide.image" alt=""></picture>
@@ -91,21 +91,31 @@ onBeforeUnmount(stop);
   height: 20px;
 }
 
-/* The design's slides carry no button and no dots, so the block had no room for either: the
-   button touched the bottom edge and the dots landed on top of it. */
-.content {
-  padding-bottom: 34px;
+/* The design's slides carry no button and no dots. Room for both is made in the text column
+   alone: .content__img is bottom-aligned, so padding on .content itself lifted the picture off
+   the bottom edge of the slide - which is exactly what it must not do. */
+.content__block {
+  padding-bottom: 26px;
 }
 
+/* Over the slide, not under it, and inside .content's own 101px padding so the dots never land
+   on the picture on the right. */
 .slider-welcome-dots {
   position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 18px;
+  left: 101px;
+  bottom: 14px;
   z-index: 2;
   display: flex;
-  justify-content: center;
   gap: 8px;
+}
+
+/* Below 880px .content stacks and centres itself; the dots follow it. */
+@media (max-width: 880px) {
+  .slider-welcome-dots {
+    left: 0;
+    right: 0;
+    justify-content: center;
+  }
 }
 
 .slider-welcome-dot {
@@ -133,7 +143,7 @@ onBeforeUnmount(stop);
   }
 
   .slider-welcome-dots {
-    bottom: 12px;
+    bottom: 10px;
   }
 }
 </style>
