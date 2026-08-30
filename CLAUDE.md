@@ -428,9 +428,23 @@ one below it are IntersectionObserver targets - scrolling either way keeps loadi
 the fallback for when the observer does not fire. Prepending restores the scroll position, and a
 `?page=` past the end lands on the last real page instead of "page not found" (the API answers 404
 both for an overshoot and for an unknown slug; asking for page 1 tells the two apart). The URL
-keeps the last loaded page, so a bot on the same address sees the same set. The product search is
-client-side over what is loaded, like the design's `app.js`, but it lives in `?q=` so a reload or a
-shared link keeps it.
+keeps the last loaded page, so a bot on the same address sees the same set. **Arriving at a deep
+page anchors the grid**: the cards are scrolled to the top of the screen and held there while the
+pictures above finish loading (a `ResizeObserver` re-pins until the reader touches the page), and
+"load previous" only pulls a page in **after** the reader has moved the page themselves - otherwise
+the layout settling would drag them off the page they asked for.
+
+**The product search is the server's** (`?q=` on `/api/catalog/products/`, `ProductQuerySet.search`
+over `name_en`/`name_ru`, capped at `MAX_SEARCH_LENGTH`). It lives in `?q=` in the storefront URL
+too, so a reload or a shared link keeps it, and every facet link carries it over. The design filters
+the loaded cards in `app.js`; doing that here counted the pagination against the whole catalog, so
+the grid offered a "load more" that added nothing visible. A new query starts at page 1.
+
+**Two button variants are ours, the rest are the design's.** `src/assets/buttons.css` (imported
+from `assets/main.css`) adds `.btn-ghost` and `.btn-solid` on top of the design's `.btn`, plus
+`.btn-ghost--light` for the purple slide. The design's only filled button is the pink-blue gradient
+(`.btn-grade` / `.button`), which stays where the designer put it - the hero and the product cards -
+and was too loud on "load more" and "pay". `style.css` itself stays a copy of the mockup.
 
 **The header is `position: fixed` over a light page**, so `App.vue` ports the design's scroll
 handler: `header-scrolled` paints it black past the first pixel and `out` slides it away while the
