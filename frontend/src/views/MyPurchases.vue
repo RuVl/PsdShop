@@ -3,7 +3,6 @@ import {ref} from 'vue';
 import {sendPurchasesLinks} from '@/api/order.js';
 import {useSettingsStore} from '@/stores/settings.js';
 import {errorMessageKey} from '@/api/errors.js';
-import PageDecor from '@/components/storefront/PageDecor.vue';
 
 // The page you land on when the link from the e-mail is lost: it tops up anything undelivered,
 // revokes the old purchases link and mails a fresh one (ADR-0002).
@@ -35,8 +34,6 @@ async function submit() {
 </script>
 
 <template>
-  <PageDecor/>
-
   <main class="main-content">
     <section class="shop mb-100">
       <div class="container">

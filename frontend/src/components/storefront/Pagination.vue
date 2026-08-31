@@ -11,11 +11,11 @@ const props = defineProps({
 });
 
 const ELLIPSIS = '…';
-// The window Django's paginator is asked for in storefront/views.py: both presentations must print
-// the same numbers, so this is a port of `Paginator.get_elided_page_range`, not a second idea of
-// what a page row looks like.
-const ON_EACH_SIDE = 1;
-const ON_ENDS = 1;
+// Pages always on the row: the current one with a neighbour on each side, plus the first and the
+// last. Same numbers as the bot page prints, so this follows Django's `get_elided_page_range` with
+// the arguments storefront/views.py passes it.
+const NEIGHBOURS = 1;
+const PINNED_AT_EACH_END = 1;
 
 // [from, to], inclusive; empty when `to` is the smaller one.
 function range(from, to) {
@@ -25,17 +25,27 @@ function range(from, to) {
 const items = computed(() => {
     const total = props.totalPages;
     const current = props.page;
-    if (total <= (ON_EACH_SIDE + ON_ENDS) * 2) return range(1, total);
+    // Short enough that eliding anything would save no slots.
+    if (total <= (NEIGHBOURS + PINNED_AT_EACH_END) * 2) return range(1, total);
 
-    // A gap is only worth an ellipsis when it hides more than the numbers it costs.
-    const head = current > ON_EACH_SIDE + ON_ENDS + 2
-        ? [...range(1, ON_ENDS), ELLIPSIS, ...range(current - ON_EACH_SIDE, current)]
-        : range(1, current);
-    const tail = current < total - ON_EACH_SIDE - ON_ENDS - 1
-        ? [...range(current + 1, current + ON_EACH_SIDE), ELLIPSIS, ...range(total - ON_ENDS + 1, total)]
-        : range(current + 1, total);
+    const pages = [];
 
-    return [...head, ...tail];
+    // Up to the current page: the pinned first pages, a gap, then the neighbours. An ellipsis that
+    // would hide a single page costs the slot it saves, so there the run is printed whole.
+    if (current - NEIGHBOURS > PINNED_AT_EACH_END + 2) {
+        pages.push(...range(1, PINNED_AT_EACH_END), ELLIPSIS, ...range(current - NEIGHBOURS, current));
+    } else {
+        pages.push(...range(1, current));
+    }
+
+    // After it, the same the other way round.
+    if (current + NEIGHBOURS < total - PINNED_AT_EACH_END - 1) {
+        pages.push(...range(current + 1, current + NEIGHBOURS), ELLIPSIS, ...range(total - PINNED_AT_EACH_END + 1, total));
+    } else {
+        pages.push(...range(current + 1, total));
+    }
+
+    return pages;
 });
 </script>
 

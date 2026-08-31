@@ -1,9 +1,8 @@
 <!--
 The dark strip under the fixed header, straight from design/index.html: decor + the white wave.
-Every view renders it as its first element - the header is `position: fixed`, so without the
-strip the content slides underneath. A listing page fills the slot with its hero (HomeHero.vue),
-the way storefront/catalog.html overrides the `hero` block of storefront/base.html; everywhere
-else the strip stays bare, as in design/product.html.
+App.vue draws it on every page and passes in the `hero` view of the current route, if it declares
+one - the way storefront/base.html holds the strip and storefront/catalog.html fills its `hero`
+block.
 -->
 
 <template>

@@ -1,4 +1,4 @@
-import {onBeforeUnmount, onMounted, readonly, ref} from 'vue';
+import {onBeforeUnmount, onMounted, ref} from 'vue';
 
 // The header is `position: fixed` over a light page, so without a background it dissolves into the
 // content as soon as anything scrolls under it. The design solves that in app.js: paint it black
@@ -7,13 +7,8 @@ import {onBeforeUnmount, onMounted, readonly, ref} from 'vue';
 // Below this the header stays put: hiding it right under the top edge only flickers.
 const HIDE_AFTER = 100;
 
-/**
- * Tracks the page scroll for the header's two classes.
- *
- * @param {() => boolean} isPinned - true while the header must stay on screen (the mobile menu is
- *                                   open, and the menu *is* the header).
- * @returns {{scrolled: Readonly<import('vue').Ref<boolean>>, hidden: Readonly<import('vue').Ref<boolean>>}}
- */
+// `isPinned` is what keeps the header on screen while the mobile menu is open - the menu is the
+// header.
 export function useHeaderScroll(isPinned = () => false) {
     const scrolled = ref(false);
     const hidden = ref(false);
@@ -42,5 +37,5 @@ export function useHeaderScroll(isPinned = () => false) {
     });
     onBeforeUnmount(() => window.removeEventListener('scroll', onScroll));
 
-    return {scrolled: readonly(scrolled), hidden: readonly(hidden)};
+    return {scrolled, hidden};
 }

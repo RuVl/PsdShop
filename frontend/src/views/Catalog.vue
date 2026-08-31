@@ -2,8 +2,6 @@
 import {computed, nextTick, ref, watch} from 'vue';
 import {useRoute, useRouter} from 'vue-router';
 import CountrySidebar from '@/components/storefront/CountrySidebar.vue';
-import HomeHero from '@/components/storefront/HomeHero.vue';
-import PageDecor from '@/components/storefront/PageDecor.vue';
 import Pagination from '@/components/storefront/Pagination.vue';
 import ProductCard from '@/components/storefront/ProductCard.vue';
 import Banner from '@/components/storefront/Banner.vue';
@@ -62,10 +60,10 @@ function facetParams() {
     return {country: countrySlug.value, type: typeSlug.value, q: searchQuery.value};
 }
 
-// Everything the grid loads from, in one string. A string and not an array: an array getter is a
-// fresh object every run, so the watcher would refire on every route change.
-function gridKey(number = page.value) {
-    return `${countrySlug.value}/${typeSlug.value}/${searchQuery.value}/${number}`;
+// Everything the grid loads from, in one string: an array getter would be a fresh object every
+// run and refire the watcher on any route change.
+function gridKey() {
+    return `${countrySlug.value}/${typeSlug.value}/${searchQuery.value}/${page.value}`;
 }
 
 // The address of a page of this listing: everything else in the query stays, and page 1 carries
@@ -78,28 +76,19 @@ function pageRoute(number) {
     return {query};
 }
 
-// What is already on screen. `load` corrects the address after an overshoot, and that correction
-// arrives back here as a route change: without this the grid would fetch the same page twice.
-let loadedKey = null;
-
-function show(data, number) {
-    products.value = data.results;
-    totalPages.value = data.totalPages;
-    state.value = 'ready';
-    loadedKey = gridKey(number);
-}
-
 async function load() {
-    if (gridKey() === loadedKey) return;
     state.value = 'loading';
     notFound.value = false;
 
     const facet = facetParams();
     const target = page.value;
     try {
-        show(await fetchProducts({...facet, page: target}), target);
+        const data = await fetchProducts({...facet, page: target});
+        products.value = data.results;
+        totalPages.value = data.totalPages;
+        state.value = 'ready';
         await nextTick();
-        scrollToGrid(target);
+        scrollToGrid();
     } catch (error) {
         if (error.response?.status !== 404) state.value = 'failed';
         // A 404 is either an unknown country/type slug or a page past the end of a real listing.
@@ -109,23 +98,18 @@ async function load() {
 }
 
 // Page 1 tells the two 404s apart: if it answers, the listing exists and the reader simply
-// overshot - show them the last real page, address included, so a reload shows the same grid.
+// overshot - correct the address to the last real page, which loads it through the watcher.
 async function landOnLastPage(facet, target) {
-    let data;
     try {
-        data = await fetchProducts({...facet, page: 1});
-        if (data.totalPages > 1) data = await fetchProducts({...facet, page: data.totalPages});
+        const {totalPages: last} = await fetchProducts({...facet, page: 1});
+        // Same page number means the catalog grew between the two requests; there is nothing to
+        // correct and no new address to reload from, so say the load failed rather than spin.
+        if (last === target) state.value = 'failed';
+        else router.replace(pageRoute(Math.max(1, last)));
     } catch (error) {
         if (error.response?.status === 404) notFound.value = true;
         else state.value = 'failed';
-        return;
     }
-
-    const last = Math.max(1, data.totalPages);
-    show(data, last);
-    if (last !== target) router.replace(pageRoute(last));
-    await nextTick();
-    scrollToGrid(last);
 }
 
 // A page change belongs at the cards, under the fixed header; landing on the page does not - the
@@ -133,10 +117,10 @@ async function landOnLastPage(facet, target) {
 // the field sits above the grid, and scrolling would pull it under the header mid-typing.
 let shownPage = null;
 
-function scrollToGrid(number) {
+function scrollToGrid() {
     const previous = shownPage;
-    shownPage = number;
-    if (previous === null || previous === number) return;
+    shownPage = page.value;
+    if (previous === null || previous === page.value) return;
 
     const card = grid.value?.firstElementChild;
     if (!card) return;
@@ -199,10 +183,6 @@ function catalogTarget(country, type) {
 </script>
 
 <template>
-  <PageDecor>
-    <HomeHero/>
-  </PageDecor>
-
   <main class="main-content">
     <Banner v-if="isHome"/>
 

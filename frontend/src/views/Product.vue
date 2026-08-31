@@ -3,7 +3,6 @@ import {computed, nextTick, onBeforeUnmount, ref, watch} from 'vue';
 import {useRoute} from 'vue-router';
 import GLightbox from 'glightbox';
 import 'glightbox/dist/css/glightbox.min.css';
-import PageDecor from '@/components/storefront/PageDecor.vue';
 import CheckoutModal from '@/components/storefront/CheckoutModal.vue';
 import CountrySidebar from '@/components/storefront/CountrySidebar.vue';
 import IconCart from '@/components/icons/IconCart.vue';
@@ -62,8 +61,6 @@ const buying = ref(false);
 </script>
 
 <template>
-  <PageDecor/>
-
   <main class="main-content">
     <div v-if="state === 'loading'" class="container">
       <p class="text black">{{ $t('products.loading') }}</p>

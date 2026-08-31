@@ -2,7 +2,6 @@
 import {ref, watch} from 'vue';
 import {useRoute} from 'vue-router';
 import {fetchPage} from '@/api/content.js';
-import PageDecor from '@/components/storefront/PageDecor.vue';
 
 // An owner-written text page (content.Page) - the SPA presentation of /:lang/<slug>/.
 const route = useRoute();
@@ -24,8 +23,6 @@ watch(() => route.params.pageSlug, load, {immediate: true});
 </script>
 
 <template>
-  <PageDecor/>
-
   <main class="main-content">
     <section class="mb-60">
       <div class="container">

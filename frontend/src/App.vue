@@ -3,6 +3,7 @@ import {computed, ref} from 'vue';
 import {useRoute} from 'vue-router';
 import LangSwitch from '@/components/storefront/LangSwitch.vue';
 import CartButton from '@/components/storefront/CartButton.vue';
+import PageDecor from '@/components/storefront/PageDecor.vue';
 import {useHeaderScroll} from '@/composables/useHeaderScroll.js';
 import {useContentStore} from '@/stores/content.js';
 
@@ -28,8 +29,6 @@ function closeMenu() {
     document.body.classList.remove('lock');
 }
 
-// Painting the fixed header over a light page is the scroll handler's whole job; the menu keeps it
-// on screen while it is open, because the menu is the header.
 const {scrolled, hidden} = useHeaderScroll(() => menuOpen.value);
 </script>
 
@@ -61,6 +60,11 @@ const {scrolled, hidden} = useHeaderScroll(() => menuOpen.value);
       </div>
     </div>
   </header>
+
+  <!-- The dark strip every page needs, with the hero of the routes that declare one. -->
+  <PageDecor>
+    <router-view name="hero"/>
+  </PageDecor>
 
   <router-view/>
 

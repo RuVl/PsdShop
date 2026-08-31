@@ -3,10 +3,8 @@
 // half of the `hero` block storefront/catalog.html overrides.
 import {useContentStore} from '@/stores/content.js';
 
-// The design puts a support button under the copy; without it the strip ends in a tall empty block
-// on a phone. The address is the owner's own (content.SiteSettings), so the button only appears
-// once they have filled it in - the design's second link (reviews) has no source behind it and is
-// left out rather than faked.
+// The support button only appears once the owner has filled the address in (content.SiteSettings);
+// without it the strip ends in a tall empty block on a phone.
 const contentStore = useContentStore();
 </script>
 
@@ -22,9 +20,8 @@ const contentStore = useContentStore();
                target="_blank" rel="noopener">{{ $t('buttons.support') }}</a>
           </div>
         </div>
+        <!-- Sized: below 880px the picture is in the flow and would grow the strip on load. -->
         <picture class="home__img">
-          <!-- Its own size: below 880px the picture is in the flow, and without it the strip
-               grows under the reader the moment it loads. -->
           <img src="/static/storefront/img/home/home-img.png" alt="Decor" width="734" height="650">
         </picture>
       </div>

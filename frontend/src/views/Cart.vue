@@ -2,7 +2,6 @@
 import {computed, onMounted, ref} from 'vue';
 import {useRoute} from 'vue-router';
 import {storeToRefs} from 'pinia';
-import PageDecor from '@/components/storefront/PageDecor.vue';
 import CheckoutModal from '@/components/storefront/CheckoutModal.vue';
 import IconTrash from '@/components/icons/IconTrash.vue';
 import {useCartStore} from '@/stores/cart.js';
@@ -44,8 +43,6 @@ onMounted(async () => {
 </script>
 
 <template>
-  <PageDecor/>
-
   <main class="main-content">
     <section class="shop mb-100">
       <div class="container">

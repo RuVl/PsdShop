@@ -2,7 +2,6 @@
 import {computed, onMounted, ref} from 'vue';
 import {useRoute} from 'vue-router';
 import {fetchSubscription, unsubscribe as postUnsubscribe} from '@/api/order.js';
-import PageDecor from '@/components/storefront/PageDecor.vue';
 
 // Reached from a broadcast footer. Reading the token is a GET and changes nothing: opening the
 // link out of curiosity - or having a mail scanner pre-fetch it - must not cost anyone the
@@ -65,8 +64,6 @@ onMounted(resolveToken);
 </script>
 
 <template>
-  <PageDecor/>
-
   <main class="main-content">
     <section class="shop mb-100">
       <div class="container">

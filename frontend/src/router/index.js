@@ -14,7 +14,12 @@ const routes = [
             {
                 name: 'home',
                 path: '',
-                component: () => import("@/views/Catalog.vue"),
+                // Two views: the page itself, and the hero App.vue puts inside the dark strip -
+                // the SPA half of the `hero` block storefront/catalog.html overrides.
+                components: {
+                    default: () => import("@/views/Catalog.vue"),
+                    hero: () => import("@/components/storefront/HomeHero.vue"),
+                },
                 meta: {name: 'routes.main'},
             },
             {
@@ -60,7 +65,10 @@ const routes = [
                 // `all` means "any" on either segment; the canonical form of all/all is the home page.
                 name: 'catalog',
                 path: ':country/:type/',
-                component: () => import("@/views/Catalog.vue"),
+                components: {
+                    default: () => import("@/views/Catalog.vue"),
+                    hero: () => import("@/components/storefront/HomeHero.vue"),
+                },
             },
         ],
     },

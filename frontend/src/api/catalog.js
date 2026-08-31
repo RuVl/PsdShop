@@ -29,7 +29,7 @@ export async function fetchProducts({country, type, page, q} = {}) {
     const {data} = await api.get('/catalog/products/', {params});
     // `total_pages` comes from the server (catalog.views.CatalogPagination): the page size is the
     // API's business, and a copy of it here would silently rot the moment the server changed it.
-    return {count: data.count, totalPages: data.total_pages, results: data.results.map(item => new Product(item))};
+    return {totalPages: data.total_pages, results: data.results.map(item => new Product(item))};
 }
 
 export async function fetchProduct(id) {

@@ -409,11 +409,11 @@ when a route is added. Data comes from `/api/catalog/...` (`src/api/catalog.js`)
 a change lands in the bot template and the Vue view together. Two pieces of markup are literally
 shared: `storefront/_bgs_decor.html` and `components/storefront/PageDecor.vue` carry the same
 decor/wave block from the design, and the dark strip must stay on every page (the header is
-`position: fixed`, so without it the content slides underneath). **Every view renders `PageDecor`
-itself**, as its first element, the way every template extends `storefront/base.html`; a listing
-fills its slot with `components/storefront/HomeHero.vue`, which is the SPA half of the `hero` block
-`storefront/catalog.html` overrides. A flag in `App.vue` used to decide that, and knowing which
-route shows a hero was never the shell's business.
+`position: fixed`, so without it the content slides underneath). `App.vue` draws it once for every
+page and puts the route's **named `hero` view** inside it: a listing route declares
+`components: {default: Catalog, hero: HomeHero}`, every other route declares none and gets the bare
+strip - the same split as `storefront/base.html` holding the strip and `storefront/catalog.html`
+filling its `hero` block.
 
 **What crawlers read** lives beside the storefront views and outside `i18n_patterns`:
 `storefront/sitemaps.py` (`/sitemap.xml`, an index over `/sitemap-<section>.xml`) and
@@ -428,23 +428,20 @@ other absolute link.
 
 **The grid shows one page, and the address says which.** `Catalog.vue` reads `?page=` and asks the
 API for exactly that page; **how many pages there are comes from the server** (`total_pages` on the
-paginated payload, `catalog.views.CatalogPagination`), so the SPA never keeps a copy of the page
-size to divide by - one did drift, and the grid offered pages the API answers 404 for.
+paginated payload, `catalog.views.CatalogPagination`), so the SPA keeps no copy of the page size to
+divide by - one did drift, and the grid offered pages the API answers 404 for.
 `components/storefront/Pagination.vue` draws numbered links - a port of Django's
-`Paginator.get_elided_page_range(on_each_side=1, on_ends=1)`, the same window
-`storefront/views.py` asks for, so both presentations print the same numbers at the same addresses
-and a crawler reaches page 6 from page 1. Page 1 carries no parameter - that is the listing's
-canonical address, and anything that is not a whole number above 1 (`?page=abc`, `-3`, `2.5`) means
-page 1. A `?page=` past the end lands on the last real page instead of "page not found" (the API
-answers 404 both for an overshoot and for an unknown slug; asking for page 1 tells the two apart,
-and the URL is corrected with it - `loadedKey` is what stops that correction from fetching the same
-page twice). Changing page scrolls the first card under the fixed header with `behavior: "instant"`
-- `style.css` sets `scroll-behavior: smooth` on `<html>`, and an animated scroll lands late and dies
-on the reader's first wheel. Only a change of page number scrolls: landing stays at the top of the
-document, where the hero and the banner are, and a new search stays where it is, because the field
-sits above the grid and would go under the header mid-typing. Nothing chases the layout afterwards
-either - the picture boxes reserve their height (`.banner__media`, the `width`/`height` on the hero
-image), which is what a 1.5-second re-pinning loop used to paper over.
+`Paginator.get_elided_page_range(on_each_side=1, on_ends=1)`, the same window `storefront/views.py`
+asks for, so both presentations print the same numbers at the same addresses and a crawler reaches
+page 6 from page 1. Page 1 carries no parameter - that is the listing's canonical address, and
+anything that is not a whole number above 1 (`?page=abc`, `-3`, `2.5`) means page 1. A `?page=` past
+the end lands on the last real page instead of "page not found" (the API answers 404 both for an
+overshoot and for an unknown slug; asking for page 1 tells the two apart, and the URL is corrected
+with it). Changing page - and only that, so a search does not pull the field it is typed in under
+the header - scrolls the first card under the fixed header with `behavior: "instant"`: `style.css`
+sets `scroll-behavior: smooth` on `<html>`, and an animated scroll lands late and dies on the
+reader's first wheel. The picture boxes reserve their height (`.banner__media`, the `width`/`height`
+on the hero image), so nothing has to chase the layout afterwards.
 **Infinite scroll used to live here** and was removed: a range of pages needed a scroll anchor, two
 observers and a guess at the reader's direction, and it still left `?page=` describing something
 other than what was on screen (see `docs/journal.md`).
@@ -475,8 +472,8 @@ page number. `style.css` itself stays a copy of the mockup.
 
 **The header is `position: fixed` over a light page**, so `composables/useHeaderScroll.js` ports the
 design's scroll handler: `header-scrolled` paints it black past the first pixel and `out` slides it
-away while the reader moves down (never while the mobile menu is open - the menu is the header,
-which is what the composable's argument says). Without those classes it dissolves into the content.
+away while the reader moves down (never while the mobile menu is open). Without those classes it
+dissolves into the content.
 
 **Verify in a browser before calling a storefront stage done** - green tests and `curl` do not
 catch a blank grid, a dead button or a layout that overflows at 320px. Run `make dev-backend`
