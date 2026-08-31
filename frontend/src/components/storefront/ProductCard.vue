@@ -1,10 +1,9 @@
 <script setup>
 import {computed, ref} from 'vue';
 import {useRoute} from 'vue-router';
-import BuyModal from '@/components/storefront/BuyModal.vue';
+import CheckoutModal from '@/components/storefront/CheckoutModal.vue';
 import IconCart from '@/components/icons/IconCart.vue';
 import {useCartStore} from '@/stores/cart.js';
-import {useLocalized} from '@/composables/localized.js';
 
 // One grid card, markup per design/index.html. The document-type name comes with the product's
 // type slug resolved against the loaded type list by the parent.
@@ -15,17 +14,8 @@ const props = defineProps({
 
 const route = useRoute();
 const cart = useCartStore();
-const localized = useLocalized();
 
-const productRoute = computed(() => ({
-    name: 'product',
-    params: {
-        lang: route.params.lang || 'en',
-        country: props.product.country,
-        type: props.product.document_type,
-        productSlug: props.product.url_slug,
-    },
-}));
+const productRoute = computed(() => props.product.route(route.params.lang || 'en'));
 
 const inCart = computed(() => cart.inCart(props.product.id));
 
@@ -42,7 +32,7 @@ const buying = ref(false);
     <router-link class="product-item-image" :to="productRoute">
       <picture v-if="product.preview?.card">
         <source v-if="product.preview.card_webp" :srcset="product.preview.card_webp" type="image/webp">
-        <img :src="product.preview.card" :alt="localized(product)">
+        <img :src="product.preview.card" :alt="product.name">
       </picture>
     </router-link>
     <div class="product-item-content">
@@ -51,11 +41,11 @@ const buying = ref(false);
         <div v-if="product.year" class="badge-year text-small">{{ product.year }}</div>
       </div>
       <div class="product-item-title">
-        <router-link :to="productRoute" class="product-item-title-link">{{ localized(product) }}</router-link>
+        <router-link :to="productRoute" class="product-item-title-link">{{ product.name }}</router-link>
       </div>
       <div class="product-item-prop-list">
         <div class="product-item-prop-label">{{ $t('storefront.card.price') }}</div>
-        <div class="product-item-prop-content">$<span class="product-item-prop-value">{{ product.price }}</span></div>
+        <div class="product-item-prop-content"><span class="product-item-prop-value">{{ product.priceLabel }}</span></div>
       </div>
       <div class="product-item-controls">
         <button class="button" type="button" @click="buying = true">{{ $t('buttons.buy_now') }}</button>
@@ -66,7 +56,7 @@ const buying = ref(false);
       </div>
     </div>
 
-    <BuyModal v-model:open="buying" :product="product"/>
+    <CheckoutModal v-model:open="buying" :product="product"/>
   </div>
 </template>
 

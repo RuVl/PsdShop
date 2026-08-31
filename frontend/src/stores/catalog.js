@@ -11,6 +11,10 @@ export const useCatalogStore = defineStore('catalog', {
     }),
     getters: {
         popularCountries: state => state.countries.filter(country => country.is_popular),
+        // A product payload names its country by slug alone - the flag and the localised name live
+        // on the country row. The cart lines are what read it: they draw a product the grid never
+        // handed them, straight out of localStorage (views/Cart.vue).
+        countryBySlug: state => slug => state.countries.find(country => country.slug === slug) || null,
     },
     actions: {
         async load() {

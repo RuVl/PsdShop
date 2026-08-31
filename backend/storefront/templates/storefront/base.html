@@ -5,6 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     {% if storefront_meta %}{{ storefront_meta }}{% else %}<title>{% translate "PDF document store" %}</title>{% endif %}
     <link rel="stylesheet" href="{% static 'storefront/css/style.css' %}">
+    {# Ours, not the mockup's: button variants and the pagination both presentations share. #}
+    <link rel="stylesheet" href="{% static 'storefront/css/shop.css' %}">
     {% block extra_head %}{% endblock %}
 </head>
 <body id="body">

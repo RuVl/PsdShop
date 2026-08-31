@@ -112,6 +112,24 @@ class CatalogViewTests(TempUploadsMixin, TestCase):
             page2 = self.client.get("/en/germany/utility-bill/?page=2")
             self.assertEqual(page2.context["page_obj"].number, 2)
 
+    def test_every_page_is_linked_by_number(self):
+        """The crawler must reach page 5 from page 1, not only page 2 (mirrors Pagination.vue)."""
+
+        for index in range(20):
+            self._product(self.germany, self.utility, year=2024, slug=f"extra-{index}")
+
+        with patch("storefront.views.PAGE_SIZE", 2):
+            page1 = self.client.get("/en/germany/utility-bill/")
+            self.assertContains(page1, 'href="?page=2"')
+            self.assertContains(page1, f'href="?page={page1.context["page_obj"].paginator.num_pages}"')
+            # A long listing is elided rather than printed page by page.
+            self.assertIn(page1.context["page_obj"].paginator.ELLIPSIS, page1.context["page_range"])
+
+    def test_a_page_past_the_end_lands_on_the_last_one(self):
+        with patch("storefront.views.PAGE_SIZE", 2):
+            response = self.client.get("/en/germany/utility-bill/?page=999")
+        self.assertEqual(response.context["page_obj"].number, response.context["page_obj"].paginator.num_pages)
+
 
 class DynamicRenderingTests(TempUploadsMixin, TestCase):
     """The UA split: bots get the rendered page, people get the SPA shell, both with one meta."""

@@ -10,7 +10,8 @@
                     <h1 class="home__title title white">{% translate "Online store of PDF files" %}</h1>
                     <p class="home__text text white">{% translate "Editable proof-of-address documents, utility bills and bank statements in PDF. Delivered by a download link right after payment." %}</p>
                 </div>
-                <picture class="home__img"><img src="{% static 'storefront/img/home/home-img.png' %}" alt="Decor"></picture>
+                {# Sized: below 880px the picture is in the flow and would grow the strip on load. #}
+                <picture class="home__img"><img src="{% static 'storefront/img/home/home-img.png' %}" alt="Decor" width="734" height="650"></picture>
             </div>
         </div>
     </section>
@@ -23,21 +24,28 @@
 
 <main class="main-content">
     {% if slides %}
-    {# The welcome slider: the SPA rotates these; a bot reads them stacked - same content. #}
-    <section class="welcome" id="welcome">
+    {# The welcome banner: the SPA rotates the slides, a bot reads them stacked - same box and content. #}
+    <section class="banner banner--static" id="welcome">
         <div class="container">
-            {% for slide in slides %}
-            <div class="content">
-                <div class="content__block">
-                    <div class="content__title title white">{{ slide.title }}</div>
-                    {% if slide.text %}<div class="idesc content__text text white"><p>{{ slide.text }}</p></div>{% endif %}
-                    {% if slide.button_label and slide.button_url %}
-                    <a class="btn btn-grade text white opacity" href="{{ slide.button_url }}">{{ slide.button_label }}</a>
-                    {% endif %}
-                </div>
-                {% if slide.image %}<picture class="content__img"><img src="{{ slide.image.url }}" alt=""></picture>{% endif %}
+            <div class="banner__frame">
+                <ul class="banner__track">
+                    {% for slide in slides %}
+                    <li class="banner__slide">
+                        <div class="banner__body">
+                            <h2 class="banner__title">{{ slide.title }}</h2>
+                            {% if slide.text %}<p class="banner__text">{{ slide.text }}</p>{% endif %}
+                            {% if slide.button_label and slide.button_url %}
+                            <a class="banner__cta btn btn-big btn-ghost btn-ghost--light"
+                               href="{{ slide.button_url }}">{{ slide.button_label }}</a>
+                            {% endif %}
+                        </div>
+                        {% if slide.image %}
+                        <picture class="banner__media"><img src="{{ slide.image.url }}" alt=""></picture>
+                        {% endif %}
+                    </li>
+                    {% endfor %}
+                </ul>
             </div>
-            {% endfor %}
         </div>
     </section>
     {% endif %}
@@ -80,13 +88,36 @@
                         </div>
 
                         {% if page_obj.has_other_pages %}
-                        <nav class="pagination">
+                        {% comment %}
+                            Numbered pages, the same set and the same addresses the SPA renders
+                            (components/storefront/Pagination.vue) - a crawler walks every page
+                            from any of them, not only the next one.
+                        {% endcomment %}
+                        <nav class="pagination" aria-label="{% translate "Catalog pages" %}">
                             {% if page_obj.has_previous %}
-                                <a class="btn text" href="?page={{ page_obj.previous_page_number }}">{% translate "Previous" %}</a>
+                                {% comment %}
+                                    Page 1 is the listing's own address, without a parameter - the
+                                    URL `canonical` prints and the SPA links.
+                                {% endcomment %}
+                                <a class="btn btn-ghost pagination__step" rel="prev"
+                                   href="{% if page_obj.previous_page_number == 1 %}{{ request.path }}{% else %}?page={{ page_obj.previous_page_number }}{% endif %}"
+                                   aria-label="{% translate "Previous page" %}">&lsaquo;</a>
                             {% endif %}
-                            <span class="text black">{{ page_obj.number }} / {{ page_obj.paginator.num_pages }}</span>
+                            {% for number in page_range %}
+                                {% if number == page_obj.paginator.ELLIPSIS %}
+                                    <span class="pagination__gap" aria-hidden="true">{{ number }}</span>
+                                {% elif number == page_obj.number %}
+                                    <a class="btn btn-solid pagination__page" aria-current="page"
+                                       href="{% if number == 1 %}{{ request.path }}{% else %}?page={{ number }}{% endif %}">{{ number }}</a>
+                                {% else %}
+                                    <a class="btn btn-ghost pagination__page"
+                                       href="{% if number == 1 %}{{ request.path }}{% else %}?page={{ number }}{% endif %}">{{ number }}</a>
+                                {% endif %}
+                            {% endfor %}
                             {% if page_obj.has_next %}
-                                <a class="btn text" href="?page={{ page_obj.next_page_number }}">{% translate "Next" %}</a>
+                                <a class="btn btn-ghost pagination__step" rel="next"
+                                   href="?page={{ page_obj.next_page_number }}"
+                                   aria-label="{% translate "Next page" %}">&rsaquo;</a>
                             {% endif %}
                         </nav>
                         {% endif %}

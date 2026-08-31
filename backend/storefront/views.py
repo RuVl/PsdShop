@@ -73,6 +73,11 @@ def catalog(request, country=None, doctype=None):
         "storefront_meta": seo.render_meta(meta),
         "products": page,
         "page_obj": page,
+        # The window the template draws: first, last and the neighbours of the current page, with
+        # `Paginator.ELLIPSIS` standing in for the gaps - the same shape Pagination.vue builds.
+        # A list, not the generator the paginator hands back: a template that walks it twice would
+        # find it empty the second time.
+        "page_range": list(page.paginator.get_elided_page_range(page.number, on_each_side=1, on_ends=1)),
         "countries": Country.objects.non_empty(),
         "popular_countries": Country.objects.non_empty().filter(is_popular=True),
         "document_types": DocumentType.objects.with_product_counts().filter(products_count__gt=0),

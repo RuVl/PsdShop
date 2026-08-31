@@ -1,16 +1,21 @@
 from decimal import Decimal
 from io import BytesIO, StringIO
+from unittest.mock import patch
 
+from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
 from django.core.files.base import ContentFile
 from django.core.management import call_command
 from django.core.management.base import CommandError
 from django.db.models import ProtectedError
 from django.test import TestCase
+from django.urls import reverse
 
 from backend.testing import TempUploadsMixin
 from backend.urlspace import reserved_slugs
+from catalog.admin import ProductFileInput
 from catalog.models import IMAGE_FIELDS, IMAGE_VARIANTS, Country, DocumentType, Product, ProductImage
+from catalog.views import CatalogPagination
 from content.models import Page
 from customer.models import Customer
 from sales.models import Order, OrderItem
@@ -235,6 +240,55 @@ class ProductFileTests(CatalogFactoryMixin, TestCase):
         self.assertTrue((self.private / product.file.name).exists())
 
 
+class ProductAdminTests(CatalogFactoryMixin, TestCase):
+    """The change page renders a field whose storage refuses to build a URL (ADR-0001)."""
+
+    def setUp(self):
+        super().setUp()
+        self.client.force_login(
+            get_user_model().objects.create_superuser(username="staff", email="staff@example.com", password="x")
+        )
+
+    def change_url(self, product: Product) -> str:
+        return reverse("admin:catalog_product_change", args=[product.pk])
+
+    def test_the_change_page_renders_a_product_with_a_file(self):
+        product = self.make_product()
+
+        response = self.client.get(self.change_url(product))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, product.file.name)
+
+    def test_the_page_does_not_link_the_paid_file(self):
+        """A link would be a path into PRODUCT_FILES_ROOT, which nothing serves."""
+
+        product = self.make_product()
+
+        response = self.client.get(self.change_url(product))
+
+        self.assertNotContains(response, f"{product.file.name}</a>")
+
+    def test_the_add_page_renders(self):
+        """No file yet, so the widget takes its other branch."""
+
+        response = self.client.get(reverse("admin:catalog_product_add"))
+
+        self.assertEqual(response.status_code, 200)
+
+    def test_a_file_that_has_a_url_is_still_linked(self):
+        """The widget is not "never link" - it is "link when the storage publishes one"."""
+
+        image = ProductImage.objects.create(product=self.make_product(), image=ContentFile(png_bytes(), name="a.png"))
+
+        self.assertEqual(ProductFileInput.value_url(image.image), image.image.url)
+
+    def test_a_file_without_a_url_reads_as_no_url(self):
+        product = self.make_product()
+
+        self.assertEqual(ProductFileInput.value_url(product.file), "")
+
+
 class ProductDeletionTests(CatalogFactoryMixin, TestCase):
     """A sold template has to stay downloadable, so the catalogue cannot drop it (ADR-0001)."""
 
@@ -330,6 +384,21 @@ class CatalogApiTests(CatalogFactoryMixin, TestCase):
         payload = self.client.get("/api/catalog/products/", {"country": "all", "type": "all"}).json()
         self.assertEqual(payload["count"], 1)
 
+    def test_the_grid_payload_says_how_many_pages_there_are(self):
+        """The SPA reads `total_pages` instead of keeping its own copy of the page size."""
+        self.make_product(slug="second")
+        self.make_product(slug="third")
+
+        with patch.object(CatalogPagination, "page_size", 2):
+            payload = self.client.get("/api/catalog/products/").json()
+
+        self.assertEqual(payload["count"], 3)
+        self.assertEqual(payload["total_pages"], 2)
+
+    def test_a_page_past_the_end_is_404(self):
+        """What the grid's overshoot correction rests on: page 2 of a one-page listing is a 404."""
+        self.assertEqual(self.client.get("/api/catalog/products/", {"page": 2}).status_code, 404)
+
     def test_inactive_products_stay_out(self):
         self.make_product(slug="hidden", is_active=False)
         self.assertEqual(self.client.get("/api/catalog/products/").json()["count"], 1)
@@ -343,3 +412,83 @@ class CatalogApiTests(CatalogFactoryMixin, TestCase):
     def test_detail_of_inactive_product_is_404(self):
         hidden = self.make_product(slug="hidden", is_active=False)
         self.assertEqual(self.client.get(f"/api/catalog/products/{hidden.pk}/").status_code, 404)
+
+
+class ProductSearchTests(CatalogFactoryMixin, TestCase):
+    """`?q=` on the grid: both languages, literal characters, and a cap on the string."""
+
+    def setUp(self):
+        super().setUp()
+        self.bill = self.make_product(
+            slug="germany-bill", name_en="Germany utility bill 2022", name_ru="Германия счёт 2022"
+        )
+        self.statement = self.make_product(
+            slug="germany-statement", name_en="Germany bank statement", name_ru="Германия банковская выписка"
+        )
+
+    def search(self, query, **params):
+        return self.client.get("/api/catalog/products/", {"q": query, **params}).json()
+
+    def test_finds_by_english_name_whatever_the_case(self):
+        payload = self.search("BANK")
+        self.assertEqual(payload["count"], 1)
+        self.assertEqual(payload["results"][0]["url_slug"], self.statement.url_slug)
+
+    def test_finds_by_russian_name(self):
+        payload = self.search("выписка")
+        self.assertEqual(payload["count"], 1)
+        self.assertEqual(payload["results"][0]["url_slug"], self.statement.url_slug)
+
+    def test_an_empty_query_filters_nothing(self):
+        for query in ["", "   "]:
+            with self.subTest(query=query):
+                self.assertEqual(self.search(query)["count"], 2)
+
+    def test_nothing_found_is_an_empty_page_not_a_404(self):
+        response = self.client.get("/api/catalog/products/", {"q": "atlantis"})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["count"], 0)
+
+    def test_like_wildcards_are_searched_literally(self):
+        discounted = self.make_product(slug="percent", name_en="50% off bill", name_ru="Скидка 50%")
+        self.assertEqual(self.search("%")["results"][0]["url_slug"], discounted.url_slug)
+        # `_` matches one character in LIKE; escaped, it matches nothing here.
+        self.assertEqual(self.search("_")["count"], 0)
+
+    def test_a_long_query_is_cut_instead_of_scanned_whole(self):
+        long_name = "x" * 150
+        wanted = self.make_product(slug="long-name", name_en=long_name, name_ru=long_name)
+        # Only the first 100 characters are looked at, so the tail cannot turn a hit into a miss.
+        payload = self.search("x" * 100 + "y" * 400)
+        self.assertEqual(payload["count"], 1)
+        self.assertEqual(payload["results"][0]["url_slug"], wanted.url_slug)
+
+    def test_search_stacks_with_the_facets(self):
+        other = Country.objects.create(name="Portugal", slug="portugal", code="pt")
+        self.make_product(slug="portugal-bill", name_en="Portugal utility bill", country=other)
+
+        payload = self.search("bill", country="germany", type="utility-bill")
+        self.assertEqual(payload["count"], 1)
+        self.assertEqual(payload["results"][0]["url_slug"], self.bill.url_slug)
+
+    def test_hidden_products_are_not_searchable(self):
+        self.make_product(slug="hidden-bill", name_en="Germany utility bill hidden", is_active=False)
+        self.assertEqual(self.search("utility bill")["count"], 1)
+
+    def test_pagination_counts_the_found_set(self):
+        for index in range(30):
+            self.make_product(
+                slug=f"flood-{index}", name_en=f"Flooded bill {index}", name_ru=f"Затопленный счёт {index}"
+            )
+
+        # A page size of its own: what is asserted here is that the search, not the whole catalog,
+        # is what gets paginated - it must not break the day the shop shows more cards per page.
+        with patch.object(CatalogPagination, "page_size", 24):
+            first = self.search("Flooded")
+            self.assertEqual(first["count"], 30)
+            self.assertEqual(first["total_pages"], 2)
+            self.assertEqual(len(first["results"]), 24)
+
+            second = self.search("Flooded", page=2)
+            self.assertEqual(len(second["results"]), 6)
+            self.assertEqual(self.client.get("/api/catalog/products/", {"q": "Flooded", "page": 3}).status_code, 404)

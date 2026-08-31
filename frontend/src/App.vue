@@ -2,23 +2,20 @@
 import {computed, ref} from 'vue';
 import {useRoute} from 'vue-router';
 import LangSwitch from '@/components/storefront/LangSwitch.vue';
-import FloatingCart from '@/components/storefront/FloatingCart.vue';
-import HeroHeader from '@/components/storefront/HeroHeader.vue';
+import CartButton from '@/components/storefront/CartButton.vue';
+import PageDecor from '@/components/storefront/PageDecor.vue';
+import {useHeaderScroll} from '@/composables/useHeaderScroll.js';
 import {useContentStore} from '@/stores/content.js';
-import {useLocalized} from '@/composables/localized.js';
 
 // The design's shell: header with menu and language flag, the page, footer, floating cart.
 // Markup and classes follow design/index.html (the storefront style.css is linked globally).
 // The menu pages and the footer texts come from the content API - same rows the bot pages render.
 const route = useRoute();
 const contentStore = useContentStore();
-const localized = useLocalized();
 contentStore.load();
 
 const lang = computed(() => route.params.lang || 'en');
 const home = computed(() => ({name: 'home', params: {lang: lang.value}}));
-// The hero lives on the listing pages; everywhere else the dark strip stays bare.
-const showHero = computed(() => ['home', 'catalog'].includes(route.name));
 
 const menuOpen = ref(false);
 
@@ -31,10 +28,12 @@ function closeMenu() {
     menuOpen.value = false;
     document.body.classList.remove('lock');
 }
+
+const {scrolled, hidden} = useHeaderScroll(() => menuOpen.value);
 </script>
 
 <template>
-  <header class="header" :class="{'header-active': menuOpen}">
+  <header class="header" :class="{'header-active': menuOpen, 'header-scrolled': scrolled, out: hidden}">
     <div class="container">
       <div class="header__body">
         <router-link :to="home" class="logo opacity" @click="closeMenu">
@@ -47,7 +46,7 @@ function closeMenu() {
             </li>
             <li v-for="navPage in contentStore.pages" :key="navPage.slug" class="menu__item white link-primary"
                 @click="closeMenu">
-              <router-link :to="{name: 'page', params: {lang, pageSlug: navPage.slug}}">{{ localized(navPage, 'title') }}</router-link>
+              <router-link :to="{name: 'page', params: {lang, pageSlug: navPage.slug}}">{{ navPage.title }}</router-link>
             </li>
           </ul>
           <LangSwitch/>
@@ -62,7 +61,10 @@ function closeMenu() {
     </div>
   </header>
 
-  <HeroHeader :show-hero="showHero"/>
+  <!-- The dark strip every page needs, with the hero of the routes that declare one. -->
+  <PageDecor>
+    <router-view name="hero"/>
+  </PageDecor>
 
   <router-view/>
 
@@ -73,8 +75,8 @@ function closeMenu() {
           <router-link :to="home" class="logo opacity">
             <picture class="logo__img"><img src="/static/storefront/img/icons/logo-footer.png" alt="Logo icon"></picture>
           </router-link>
-          <p v-if="contentStore.settings && localized(contentStore.settings, 'footer_note')" class="text-small black">
-            {{ localized(contentStore.settings, 'footer_note') }}
+          <p v-if="contentStore.settings && contentStore.settings.footer_note" class="text-small black">
+            {{ contentStore.settings.footer_note }}
           </p>
         </div>
         <div class="footer__block">
@@ -85,7 +87,7 @@ function closeMenu() {
                 <router-link :to="home">{{ $t('storefront.nav.home') }}</router-link>
               </li>
               <li v-for="navPage in contentStore.pages" :key="navPage.slug" class="footer__item text black link-primary">
-                <router-link :to="{name: 'page', params: {lang, pageSlug: navPage.slug}}">{{ localized(navPage, 'title') }}</router-link>
+                <router-link :to="{name: 'page', params: {lang, pageSlug: navPage.slug}}">{{ navPage.title }}</router-link>
               </li>
             </ul>
           </div>
@@ -98,5 +100,5 @@ function closeMenu() {
     </div>
   </footer>
 
-  <FloatingCart/>
+  <CartButton/>
 </template>

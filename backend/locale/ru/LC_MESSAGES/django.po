@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: verdoc-backend\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-08-28 12:20+0000\n"
+"POT-Creation-Date: 2026-08-30 11:45+0000\n"
 "PO-Revision-Date: 2026-08-06 15:49+0000\n"
 "Last-Translator: \n"
 "Language-Team: \n"
@@ -46,19 +46,19 @@ msgstr ""
 msgid "Document types"
 msgstr ""
 
-#: catalog/models.py:178
+#: catalog/models.py:196
 msgid "Product"
 msgstr ""
 
-#: catalog/models.py:179
+#: catalog/models.py:197
 msgid "Products"
 msgstr ""
 
-#: catalog/models.py:244
+#: catalog/models.py:262
 msgid "Product image"
 msgstr ""
 
-#: catalog/models.py:245
+#: catalog/models.py:263
 msgid "Product images"
 msgstr ""
 
@@ -82,11 +82,11 @@ msgstr ""
 msgid "Site settings"
 msgstr ""
 
-#: customer/models.py:84
+#: customer/models.py:82
 msgid "Customer"
 msgstr ""
 
-#: customer/models.py:85
+#: customer/models.py:83
 msgid "Customers"
 msgstr ""
 
@@ -118,7 +118,7 @@ msgstr ""
 msgid "Broadcast deliveries"
 msgstr ""
 
-#: mailing/services.py:64
+#: mailing/services.py:63
 msgid "Unsubscribe from this mailing list"
 msgstr "Отписаться от рассылки"
 
@@ -181,11 +181,11 @@ msgstr ""
 msgid "Your order is complete"
 msgstr "Ваш заказ выполнен"
 
-#: storefront/seo.py:23 storefront/templates/storefront/base.html:6
+#: storefront/seo.py:24 storefront/templates/storefront/base.html:6
 msgid "PDF document store"
 msgstr "Магазин PDF-документов"
 
-#: storefront/seo.py:29 storefront/templates/storefront/catalog.html:13
+#: storefront/seo.py:30 storefront/templates/storefront/catalog.html:11
 msgid ""
 "Editable proof-of-address documents, utility bills and bank statements in "
 "PDF. Delivered by a download link right after payment."
@@ -194,7 +194,7 @@ msgstr ""
 "услуги и банковские выписки в PDF. Ссылка на скачивание приходит сразу после "
 "оплаты."
 
-#: storefront/templates/storefront/_product_card.html:22
+#: storefront/templates/storefront/_product_card.html:20
 #: storefront/templates/storefront/product.html:71
 msgid "Price"
 msgstr "Цена"
@@ -208,7 +208,7 @@ msgid "Popular"
 msgstr "Популярные"
 
 #: storefront/templates/storefront/_sidebar.html:25
-#: storefront/templates/storefront/catalog.html:41
+#: storefront/templates/storefront/catalog.html:64
 msgid "All categories"
 msgstr "Все категории"
 
@@ -216,61 +216,61 @@ msgstr "Все категории"
 msgid "All countries"
 msgstr "Все страны"
 
-#: storefront/templates/storefront/base.html:19
-#: storefront/templates/storefront/base.html:50
+#: storefront/templates/storefront/base.html:21
+#: storefront/templates/storefront/base.html:61
 #: storefront/templates/storefront/product.html:12
 msgid "Home"
 msgstr "Главная"
 
-#: storefront/templates/storefront/base.html:20
-#: storefront/templates/storefront/base.html:52
-msgid "Rules"
-msgstr "Правила"
-
-#: storefront/templates/storefront/base.html:21
-#: storefront/templates/storefront/base.html:51
-msgid "Contacts"
-msgstr "Контакты"
-
-#: storefront/templates/storefront/base.html:47
+#: storefront/templates/storefront/base.html:58
 msgid "Links"
 msgstr "Ссылки"
 
-#: storefront/templates/storefront/base.html:58
+#: storefront/templates/storefront/base.html:70
 msgid "Contact support"
 msgstr "Написать в поддержку"
 
-#: storefront/templates/storefront/catalog.html:12
+#: storefront/templates/storefront/catalog.html:10
 msgid "Online store of PDF files"
 msgstr "Онлайн-магазин PDF-файлов"
 
-#: storefront/templates/storefront/catalog.html:28
+#: storefront/templates/storefront/catalog.html:51
 msgid "Product list"
 msgstr "Список товаров"
 
-#: storefront/templates/storefront/catalog.html:31
+#: storefront/templates/storefront/catalog.html:54
 msgid "All products"
 msgstr "Все товары"
 
-#: storefront/templates/storefront/catalog.html:36
+#: storefront/templates/storefront/catalog.html:59
 msgid "Filter products"
 msgstr "Фильтр по товарам"
 
-#: storefront/templates/storefront/catalog.html:55
+#: storefront/templates/storefront/catalog.html:78
 msgid "Nothing found for this selection."
 msgstr "По этому запросу ничего не найдено."
 
-#: storefront/templates/storefront/catalog.html:62
-msgid "Previous"
-msgstr "Назад"
+#: storefront/templates/storefront/catalog.html:86
+msgid "Catalog pages"
+msgstr "Страницы каталога"
 
-#: storefront/templates/storefront/catalog.html:66
-msgid "Next"
-msgstr "Вперёд"
+#: storefront/templates/storefront/catalog.html:90
+msgid "Previous page"
+msgstr "Предыдущая страница"
+
+#: storefront/templates/storefront/catalog.html:105
+msgid "Next page"
+msgstr "Следующая страница"
 
 #: storefront/templates/storefront/product.html:32
 msgid "Product card"
 msgstr "Карточка товара"
+
+#~ msgid "Rules"
+#~ msgstr "Правила"
+
+#~ msgid "Contacts"
+#~ msgstr "Контакты"
 
 #~ msgid "Buy now"
 #~ msgstr "Купить сейчас"

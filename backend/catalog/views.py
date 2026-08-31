@@ -18,11 +18,17 @@ from catalog.serializers import (
 )
 
 # Cards per page, shared with the server-rendered listing (storefront.views).
-PAGE_SIZE = 24
+PAGE_SIZE = 100
 
 
 class CatalogPagination(PageNumberPagination):
     page_size = PAGE_SIZE
+
+    def get_paginated_response(self, data):
+        """Adds `total_pages`, so the SPA never has to keep a copy of the page size to divide by."""
+        response = super().get_paginated_response(data)
+        response.data["total_pages"] = self.page.paginator.num_pages
+        return response
 
 
 class CountryListView(ListAPIView):
@@ -44,7 +50,13 @@ class DocumentTypeListView(ListAPIView):
 
 
 class ProductListView(ListAPIView):
-    """The grid. `?country=` and `?type=` take slugs; `all` or absence means any; `?page=` pages."""
+    """The grid.
+
+    `?country=` and `?type=` take slugs; `all` or absence means any; `?page=` pages; `?q=` is the
+    product search. The search is the server's job rather than the SPA's: filtering only the pages
+    already loaded would count the pagination against the whole catalog and offer a "load more"
+    that adds nothing.
+    """
 
     serializer_class = ProductListSerializer
     pagination_class = CatalogPagination
@@ -60,7 +72,7 @@ class ProductListView(ListAPIView):
         if doctype and doctype != "all":
             products = products.filter(document_type=get_object_or_404(DocumentType, slug=doctype))
 
-        return products
+        return products.search(self.request.query_params.get("q"))
 
 
 class ProductDetailView(RetrieveAPIView):

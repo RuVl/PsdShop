@@ -3,7 +3,6 @@ import {computed, nextTick, onBeforeUnmount, ref, watch} from 'vue';
 import IconCross from '@/components/icons/IconCross.vue';
 import {useOrderStore} from '@/stores/order.js';
 import {useCartStore} from '@/stores/cart.js';
-import {useLocalized} from '@/composables/localized.js';
 import {errorMessageKey} from '@/api/errors.js';
 
 // The one place an order is paid for, in the design's modal markup (`.remodal.modalpay` and the
@@ -19,7 +18,6 @@ const open = defineModel('open', {default: false});
 
 const orderStore = useOrderStore();
 const cart = useCartStore();
-const localized = useLocalized();
 
 const email = ref('');
 const sending = ref(false);
@@ -92,8 +90,8 @@ onBeforeUnmount(() => {
 
           <div class="modal-buy__props">
             <div v-for="line in lines" :key="line.id" class="modal-buy__props_item buy-modal__line">
-              <span class="modal-buy__props_label">{{ localized(line) }}</span>
-              <span class="modal-buy__props_value">${{ Number(line.price).toFixed(2) }}</span>
+              <span class="modal-buy__props_label">{{ line.name }}</span>
+              <span class="modal-buy__props_value">{{ line.priceLabel }}</span>
             </div>
             <p v-if="!lines.length" class="modal-buy__props_label">{{ $t('cart_view.empty') }}</p>
           </div>
@@ -175,12 +173,36 @@ onBeforeUnmount(() => {
   height: 12px;
 }
 
+/* The design's props block is a centred, wrapping row of two-word columns - with a list of
+   purchases every line found its own place and the prices never lined up. One line per row: the
+   name takes the space it needs on the left, the price stays on the right edge. */
+.modal-buy__props {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+  /* The design's 316px was for a pair of short props; a purchase list uses the modal's width, the
+     same as the e-mail field under it. */
+  width: 100%;
+}
+
 .buy-modal__line {
   width: 100%;
   flex-direction: row;
   align-items: baseline;
   justify-content: space-between;
   gap: 12px;
+}
+
+.buy-modal__line .modal-buy__props_label {
+  flex: 1;
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+
+.buy-modal__line .modal-buy__props_value {
+  flex: none;
+  text-align: right;
+  white-space: nowrap;
 }
 
 .buy-modal__error {

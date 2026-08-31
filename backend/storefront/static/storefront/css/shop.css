@@ -1,0 +1,384 @@
+/* What the storefront needs and the mockup does not ship, dressed for both presentations: the SPA
+   and the server-rendered bot page link this file next to style.css, so a button or a page number
+   looks the same whichever one the visitor got (ADR-0010).
+
+   Two button variants first.
+
+   style.css stays the designer's file, so the additions live here. Its only filled button is
+   `.btn-grade` / `.button` - the pink-blue gradient - which is right where the designer put it
+   (the hero and the product cards) and too loud everywhere else: a "load more" under a white grid
+   and a "pay" at the end of a list do not both need the loudest button on the page. */
+
+.btn-ghost,
+.btn-solid {
+    font-family: inherit;
+    font-size: 14px;
+    line-height: 1.2;
+    font-weight: var(--bold);
+    text-align: center;
+    text-decoration: none;
+    border-radius: 50px;
+    border: 2px solid transparent;
+    transition: color .3s, background .3s, border-color .3s;
+}
+
+.btn-ghost {
+    color: var(--primary);
+    background: var(--white);
+    border-color: rgba(63, 47, 241, .25);
+}
+
+.btn-ghost:hover:not(:disabled) {
+    background: rgba(63, 47, 241, .06);
+    border-color: var(--primary);
+}
+
+.btn-solid {
+    color: var(--white);
+    background: var(--primary);
+    border-color: var(--primary);
+}
+
+.btn-solid:hover:not(:disabled) {
+    background: var(--link-active);
+    border-color: var(--link-active);
+}
+
+.btn-ghost:disabled,
+.btn-solid:disabled {
+    opacity: .5;
+    cursor: default;
+}
+
+/* The same ghost, read on the purple slide instead of on white. */
+.btn-ghost--light {
+    color: var(--white);
+    background: transparent;
+    border-color: rgba(255, 255, 255, .6);
+}
+
+.btn-ghost--light:hover:not(:disabled) {
+    background: rgba(255, 255, 255, .15);
+    border-color: var(--white);
+}
+
+
+/* Numbered pagination - components/storefront/Pagination.vue and the block at the end of
+   storefront/catalog.html render the same markup. */
+.pagination {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 30px;
+}
+
+.pagination__page,
+.pagination__step {
+    min-width: 40px;
+    padding: 8px 12px;
+    text-align: center;
+    line-height: 1.2;
+}
+
+.pagination__step {
+    font-size: 18px;
+}
+
+.pagination__gap {
+    padding: 0 2px;
+    color: rgba(0, 0, 0, .4);
+}
+
+
+/* The welcome banner - components/storefront/Banner.vue and the `.banner--static` block in
+   storefront/catalog.html render the same box, so both presentations show one banner (ADR-0010).
+
+   Written from scratch, not on the mockup's slider: `style.css` faked the rounded purple panel
+   with two white gradient strips and two `box-shadow: 0 0 0 30px #fff` corner masks, which only
+   works over a white page and leaves the corners painted on top of the content. Here the panel
+   is one element with a real `border-radius` and `overflow: hidden`, so nothing is drawn over the
+   slide and the block sits on any background. */
+.banner {
+    /* Tucked into the dark header strip's bottom padding, the way the mockup sat it there. */
+    margin-top: -24px;
+    margin-bottom: 25px;
+}
+
+@media (max-width: 800px) {
+    .banner {
+        margin-top: 0;
+    }
+}
+
+.banner__frame {
+    position: relative;
+    border-radius: 20px;
+    overflow: hidden;
+    background: var(--primary);
+    color: var(--white);
+}
+
+/* Every slide in one grid cell: the frame is as tall as the tallest slide and keeps that height
+   while they change, with no measuring and no jump. */
+.banner__track {
+    display: grid;
+    list-style: none;
+}
+
+.banner__slide {
+    grid-area: 1 / 1;
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 20px;
+    padding: 0 76px;
+    opacity: 0;
+    visibility: hidden;
+    transition: opacity .45s ease;
+}
+
+.banner__slide.is-current {
+    opacity: 1;
+    visibility: visible;
+}
+
+/* The bot page has no script to rotate them, so it prints the slides one under another. */
+.banner--static .banner__slide {
+    grid-area: auto;
+    opacity: 1;
+    visibility: visible;
+}
+
+.banner--static .banner__slide + .banner__slide {
+    border-top: 1px solid rgba(255, 255, 255, .2);
+}
+
+/* Room for the dots is made here, not on the slide: the picture is flush with the bottom edge. */
+.banner__body {
+    flex: 1 1 auto;
+    align-self: center;
+    padding: 28px 0 46px;
+}
+
+.banner__title {
+    font-size: 30px;
+    line-height: normal;
+    font-weight: var(--bold);
+}
+
+.banner__text {
+    max-width: 600px;
+    margin-top: 16px;
+    font-size: 14px;
+    line-height: 22px;
+    font-weight: var(--regular);
+}
+
+.banner__cta {
+    margin-top: 24px;
+}
+
+.banner__media {
+    flex: 0 0 auto;
+    align-self: flex-end;
+    /* A height, not a max-height on the picture: the slides share one grid cell, so a picture that
+       only claims its space once it has loaded resizes the whole banner under the reader. */
+    width: 300px;
+    height: 202px;
+    max-width: 100%;
+}
+
+.banner__media img {
+    display: block;
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    object-position: bottom;
+}
+
+.banner__arrow {
+    position: absolute;
+    top: 50%;
+    z-index: 2;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    height: 91px;
+    padding: 0;
+    color: var(--white);
+    background: rgba(255, 255, 255, .1);
+    border: 0;
+    border-radius: 20px;
+    transform: translateY(-50%);
+    cursor: pointer;
+    transition: background .3s;
+}
+
+.banner__arrow:hover {
+    background: rgba(255, 255, 255, .3);
+}
+
+.banner__arrow:active {
+    background: rgba(255, 255, 255, .5);
+}
+
+.banner__arrow svg {
+    width: 12px;
+    height: 20px;
+}
+
+.banner__arrow--prev {
+    left: 20px;
+}
+
+.banner__arrow--next {
+    right: 20px;
+}
+
+.banner__dots {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 16px;
+    z-index: 2;
+    display: flex;
+    justify-content: center;
+    gap: 8px;
+}
+
+.banner__dot {
+    width: 8px;
+    height: 8px;
+    padding: 0;
+    border: 0;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, .45);
+    cursor: pointer;
+    transition: background .3s, transform .3s;
+}
+
+.banner__dot.is-current {
+    background: var(--white);
+    transform: scale(1.3);
+}
+
+.banner__arrow:focus-visible,
+.banner__dot:focus-visible {
+    outline: 2px solid var(--white);
+    outline-offset: 3px;
+}
+
+/* Stacked: the picture on top, the words under it, both centred - the row layout squeezes the text
+   into a column narrower than a sentence long before this width. */
+@media (max-width: 880px) {
+    .banner__slide {
+        flex-direction: column-reverse;
+        align-items: center;
+        justify-content: center;
+        gap: 0;
+        padding: 0 56px;
+    }
+
+    .banner__body {
+        /* Not stretched: the free height belongs to the slide, which centres the pair - grown, the
+           text block would keep it and hang the words from the top. */
+        flex: 0 0 auto;
+        align-self: stretch;
+        padding: 12px 0 40px;
+        text-align: center;
+    }
+
+    .banner__text {
+        margin-left: auto;
+        margin-right: auto;
+    }
+
+    .banner__media {
+        align-self: center;
+        width: 220px;
+        height: 172px;
+        padding-top: 22px;
+    }
+}
+
+/* The arrows would sit on the text at this width - the dots are what steers there. Everything else
+   shrinks with the screen: the desktop picture took half the banner on a phone, and the slides
+   share one height, so the tallest one decided how much empty purple the short ones showed. */
+@media (max-width: 560px) {
+    .banner__slide {
+        padding: 0 20px;
+    }
+
+    .banner__body {
+        padding: 10px 0 34px;
+    }
+
+    .banner__title {
+        font-size: 22px;
+    }
+
+    .banner__text {
+        margin-top: 12px;
+        line-height: 20px;
+    }
+
+    .banner__cta {
+        margin-top: 18px;
+    }
+
+    .banner__media {
+        width: 200px;
+        height: 150px;
+        padding-top: 20px;
+    }
+
+    .banner__arrow {
+        display: none;
+    }
+
+    .banner__dots {
+        bottom: 12px;
+    }
+}
+
+/* A phone held sideways has ~360px of height for everything: stacked, the banner alone is taller
+   than the screen, so the picture goes back beside the words. */
+@media (max-width: 880px) and (max-height: 520px) and (orientation: landscape) {
+    .banner__slide {
+        flex-direction: row;
+        align-items: center;
+        gap: 16px;
+        /* Clear of the arrows: they are back on screen at this width. */
+        padding: 0 68px;
+    }
+
+    .banner__body {
+        flex: 1 1 auto;
+        align-self: center;
+        padding: 14px 0 28px;
+        text-align: left;
+    }
+
+    .banner__text {
+        margin-left: 0;
+        margin-right: 0;
+    }
+
+    .banner__media {
+        align-self: center;
+        width: 180px;
+        height: 120px;
+        padding-top: 0;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .banner__slide,
+    .banner__dot,
+    .banner__arrow {
+        transition: none;
+    }
+}

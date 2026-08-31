@@ -3,20 +3,18 @@ import {computed, nextTick, onBeforeUnmount, ref, watch} from 'vue';
 import {useRoute} from 'vue-router';
 import GLightbox from 'glightbox';
 import 'glightbox/dist/css/glightbox.min.css';
-import BuyModal from '@/components/storefront/BuyModal.vue';
+import CheckoutModal from '@/components/storefront/CheckoutModal.vue';
 import CountrySidebar from '@/components/storefront/CountrySidebar.vue';
 import IconCart from '@/components/icons/IconCart.vue';
 import {fetchProduct} from '@/api/catalog.js';
 import {useCartStore} from '@/stores/cart.js';
 import {useCatalogStore} from '@/stores/catalog.js';
-import {useLocalized} from '@/composables/localized.js';
 
 // The product page per design/product.html: breadcrumbs, the shared sidebar, a gallery with
 // a glightbox zoom, and the buy block. The `<id>-<slug>` URL segment resolves by the id.
 const route = useRoute();
 const cart = useCartStore();
 const catalogStore = useCatalogStore();
-const localized = useLocalized();
 
 catalogStore.load();
 
@@ -83,10 +81,10 @@ const buying = ref(false);
             </li>
             <li>
               <router-link :to="listingTarget">
-                <span>{{ productCountry ? localized(productCountry) : route.params.country }}<template v-if="productType"> — {{ localized(productType) }}</template></span>
+                <span>{{ productCountry ? productCountry.name : route.params.country }}<template v-if="productType"> — {{ productType.name }}</template></span>
               </router-link>
             </li>
-            <li><span>{{ localized(product) }}</span></li>
+            <li><span>{{ product.name }}</span></li>
           </ul>
         </div>
       </div>
@@ -102,33 +100,33 @@ const buying = ref(false);
                 <div class="product-item__gallery">
                   <div v-if="mainImage" class="product-width-image">
                     <a :href="mainImage.page || mainImage.card" class="product-width-image-link glightbox-product">
-                      <img :src="mainImage.card" :alt="localized(product)">
+                      <img :src="mainImage.card" :alt="product.name">
                     </a>
                   </div>
                   <div v-if="gallery.length > 1" class="product-width-images-list">
                     <a v-for="(image, index) in gallery.slice(1)" :key="index"
                        class="product-width-images-item glightbox-product" :href="image.page || image.card">
-                      <img :src="image.card" :alt="localized(product)">
+                      <img :src="image.card" :alt="product.name">
                     </a>
                   </div>
                 </div>
                 <div class="product-item__descr">
                   <div class="product-item__header">
                     <div class="product-item__header-props">
-                      <div class="badge text-small primary">{{ productType ? localized(productType) : '' }}</div>
+                      <div class="badge text-small primary">{{ productType ? productType.name : '' }}</div>
                       <div v-if="product.year" class="badge-year text-small">{{ product.year }}</div>
                     </div>
                     <span v-if="productCountry" class="product-item__lang">{{ productCountry.flag }}</span>
                   </div>
-                  <h1 class="title-section black">{{ localized(product) }}</h1>
-                  <div v-if="localized(product, 'description')" class="idesc product-item__text">
-                    <p>{{ localized(product, 'description') }}</p>
+                  <h1 class="title-section black">{{ product.name }}</h1>
+                  <div v-if="product.description" class="idesc product-item__text">
+                    <p>{{ product.description }}</p>
                   </div>
 
                   <div class="product-item__info">
                     <div class="product-item__price">
                       <div class="text-mid black">{{ $t('storefront.card.price') }}</div>
-                      <div class="text-mid black">$<span class="primary">{{ product.price }}</span></div>
+                      <div class="text-mid black"><span class="primary">{{ product.priceLabel }}</span></div>
                     </div>
                     <div class="product-item__controls">
                       <button class="button" type="button" @click="buying = true">{{ $t('buttons.buy_now') }}</button>
@@ -146,7 +144,7 @@ const buying = ref(false);
         </div>
       </section>
 
-      <BuyModal v-model:open="buying" :product="product"/>
+      <CheckoutModal v-model:open="buying" :product="product"/>
     </template>
   </main>
 </template>

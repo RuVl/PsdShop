@@ -2,11 +2,9 @@
 import {ref, watch} from 'vue';
 import {useRoute} from 'vue-router';
 import {fetchPage} from '@/api/content.js';
-import {useLocalized} from '@/composables/localized.js';
 
 // An owner-written text page (content.Page) - the SPA presentation of /:lang/<slug>/.
 const route = useRoute();
-const localized = useLocalized();
 
 const page = ref(null);
 const state = ref('loading');
@@ -32,9 +30,9 @@ watch(() => route.params.pageSlug, load, {immediate: true});
         <p v-else-if="state === 'not_found'" class="text black">{{ $t('storefront.grid.not_found') }}</p>
         <p v-else-if="state === 'failed'" class="text black">{{ $t('errors.unavailable') }}</p>
         <template v-else>
-          <h1 class="title-section title black">{{ localized(page, 'title') }}</h1>
+          <h1 class="title-section title black">{{ page.title }}</h1>
           <!-- Owner-authored HTML from the admin editor. -->
-          <div class="idesc" v-html="localized(page, 'body')"></div>
+          <div class="idesc" v-html="page.body"></div>
         </template>
       </div>
     </section>

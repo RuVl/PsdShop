@@ -407,9 +407,13 @@ pages on the same URLs. vue-router mirrors `backend/backend/urlspace.py`; keep t
 when a route is added. Data comes from `/api/catalog/...` (`src/api/catalog.js`) and
 `/api/content/...` (`src/api/content.js`), and both presentations must stay content-equivalent -
 a change lands in the bot template and the Vue view together. Two pieces of markup are literally
-shared: `storefront/_bgs_decor.html` and `components/storefront/HeroHeader.vue` carry the same
+shared: `storefront/_bgs_decor.html` and `components/storefront/PageDecor.vue` carry the same
 decor/wave block from the design, and the dark strip must stay on every page (the header is
-`position: fixed`, so without it the content slides underneath).
+`position: fixed`, so without it the content slides underneath). `App.vue` draws it once for every
+page and puts the route's **named `hero` view** inside it: a listing route declares
+`components: {default: Catalog, hero: HomeHero}`, every other route declares none and gets the bare
+strip - the same split as `storefront/base.html` holding the strip and `storefront/catalog.html`
+filling its `hero` block.
 
 **What crawlers read** lives beside the storefront views and outside `i18n_patterns`:
 `storefront/sitemaps.py` (`/sitemap.xml`, an index over `/sitemap-<section>.xml`) and
@@ -422,19 +426,77 @@ string `seo.x_default` puts in `<head>`, so the two presentations advertise one 
 rendered by Django so its `Sitemap:` line is built from `django_site` + `SITE_SCHEME` like every
 other absolute link.
 
+**The grid shows one page, and the address says which.** `Catalog.vue` reads `?page=` and asks the
+API for exactly that page; **how many pages there are comes from the server** (`total_pages` on the
+paginated payload, `catalog.views.CatalogPagination`), so the SPA keeps no copy of the page size to
+divide by - one did drift, and the grid offered pages the API answers 404 for.
+`components/storefront/Pagination.vue` draws numbered links - a port of Django's
+`Paginator.get_elided_page_range(on_each_side=1, on_ends=1)`, the same window `storefront/views.py`
+asks for, so both presentations print the same numbers at the same addresses and a crawler reaches
+page 6 from page 1. Page 1 carries no parameter - that is the listing's canonical address, and
+anything that is not a whole number above 1 (`?page=abc`, `-3`, `2.5`) means page 1. A `?page=` past
+the end lands on the last real page instead of "page not found" (the API answers 404 both for an
+overshoot and for an unknown slug; asking for page 1 tells the two apart, and the URL is corrected
+with it). Changing page - and only that, so a search does not pull the field it is typed in under
+the header - scrolls the first card under the fixed header with `behavior: "instant"`: `style.css`
+sets `scroll-behavior: smooth` on `<html>`, and an animated scroll lands late and dies on the
+reader's first wheel. The picture boxes reserve their height (`.banner__media`, the `width`/`height`
+on the hero image), so nothing has to chase the layout afterwards.
+**Infinite scroll used to live here** and was removed: a range of pages needed a scroll anchor, two
+observers and a guess at the reader's direction, and it still left `?page=` describing something
+other than what was on screen (see `docs/journal.md`).
+
+**The welcome banner is ours, not the mockup's slider.** `components/storefront/Banner.vue` and the
+`.banner--static` block in `storefront/catalog.html` render the same box, dressed by `.banner` in
+`shop.css`: one purple panel with a real `border-radius`, the slides stacked in one grid cell so the
+height is the tallest slide's and never jumps, a crossfade between them, arrows, dots, swipe and the
+left/right keys. Autoplay stops on hover, on focus, on a hidden tab and under
+`prefers-reduced-motion`; the slide that is not showing is `inert`, so its link is out of the tab
+order. The design's markup (`.slider-welcome`, `.content`, `.swiper-*`) is gone from both
+presentations: it faked the rounded corners with two white gradient strips and two
+`box-shadow: 0 0 0 30px #fff` masks painted over the slide, which only works on a white page.
+
+**The product search is the server's** (`?q=` on `/api/catalog/products/`, `ProductQuerySet.search`
+over `name_en`/`name_ru`, capped at `MAX_SEARCH_LENGTH`). It lives in `?q=` in the storefront URL
+too, so a reload or a shared link keeps it, and every facet link carries it over. The design filters
+the loaded cards in `app.js`; doing that here counted the pagination against the whole catalog, so
+the grid offered a "load more" that added nothing visible. A new query starts at page 1.
+
+**What the mockup does not ship lives in `storefront/css/shop.css`**, next to `style.css` and
+linked by **both** presentations (`storefront/base.html` and `frontend/index.html`), so a button or
+a page number looks the same whichever one the visitor got: `.btn-ghost` / `.btn-solid` on top of
+the design's `.btn` (plus `.btn-ghost--light` for the purple slide) and the `.pagination` block.
+The design's only filled button is the pink-blue gradient (`.btn-grade` / `.button`), which stays
+where the designer put it - the hero and the product cards - and was too loud on "pay" and on a
+page number. `style.css` itself stays a copy of the mockup.
+
+**The header is `position: fixed` over a light page**, so `composables/useHeaderScroll.js` ports the
+design's scroll handler: `header-scrolled` paints it black past the first pixel and `out` slides it
+away while the reader moves down (never while the mobile menu is open). Without those classes it
+dissolves into the content.
+
 **Verify in a browser before calling a storefront stage done** - green tests and `curl` do not
 catch a blank grid, a dead button or a layout that overflows at 320px. Run `make dev-backend`
 plus `make dev-frontend` (or `make spa` and the backend alone), then click through: catalog,
 filters, product page, add to cart, cart, checkout modal, both languages.
 
-The cart is a **set** of product payloads (no quantities - an order holds a product at most
+**Everything the API hands over is a model, not a payload** (`src/models/`). `Localized` turns the
+`name_en`/`name_ru` pairs every endpoint carries into one property read against the active locale
+with an English fallback - the rule modeltranslation applies on the server - and `Product`,
+`Country`, `DocumentType`, `Page`, `Slide`, `SiteSettings` extend it. `Product` also owns the two
+things that used to be copied around: `priceLabel` (USD, two decimals) and `route(lang)`. The api
+modules construct them, so a view never sees raw JSON. One catch: `localStorage` holds JSON, so
+`stores/cart.js` rebuilds its lines with `new Product(...)` in the persist plugin's `afterHydrate`
+- without it `item.name` is undefined until the first `refresh()`.
+
+The cart is a **set** of products (no quantities - an order holds a product at most
 once); `stores/cart.js` persists it, the floating `cartlequebutton` from the design is
-`components/storefront/FloatingCart.vue`. `Cart.vue` calls `cart.refresh()` on open, which asks
+`components/storefront/CartButton.vue`. `Cart.vue` calls `cart.refresh()` on open, which asks
 `GET /api/cart/items/?ids=` what those ids are now: localStorage may be months old, and the
 invoice is written from the catalog, so a product off the shelf leaves the cart here rather than
 failing at the checkout and a price that moved is corrected before the customer sees the total.
 
-**One component takes money: `components/storefront/BuyModal.vue`.** It is the cart's pay button
+**One component takes money: `components/storefront/CheckoutModal.vue`.** It is the cart's pay button
 and the "buy now" of every card and product page - the express path buys one template without
 touching the cart. The markup is the design's (`.remodal.modalpay`, `.modal-buy__*`,
 `.input-box*`), but remodal is not carried over, so Escape, the backdrop, the scroll lock and the
@@ -467,8 +529,9 @@ The design is a static build in **`design/`** (`index.html`, `product.html`, `st
 `backend/storefront/static/storefront/css/` and dresses both presentations, so a Vue component
 reuses the design's class names rather than inventing its own. The jQuery plugins it ships with
 (`remodal`, `swiper-bundle`, jQuery itself) are **not** carried over: the modal is our own
-component, the welcome slider is `components/storefront/WelcomeSlider.vue` (~50 lines, the design's
-arrow styles), and the filters/burger/search in `app.js` are reactive state. `glightbox` stays, as
+component, the welcome banner is `components/storefront/Banner.vue` on the `.banner` block in
+`shop.css` - markup and styles of its own, nothing left of the mockup's slider (see below), and the
+filters/burger/search in `app.js` are reactive state. `glightbox` stays, as
 an npm package, for the product gallery.
 `design/Инструкция по обновлению.txt` documents the year badge and the filter block the designer
 added last - follow it when the markup differs from an older screenshot.

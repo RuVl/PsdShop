@@ -1,10 +1,64 @@
 from django.contrib import admin, messages
+from django.contrib.admin.widgets import AdminFileWidget
+from django.db import models
 from django.db.models import ProtectedError
+from django.db.models.fields.files import FieldFile
 from django.utils.html import format_html
 from modeltranslation.admin import TranslationAdmin
 
 from backend.seo import SeoFieldsetMixin
 from catalog.models import Country, DocumentType, Product, ProductImage
+
+
+class ProductFileInput(AdminFileWidget):
+    """
+    The admin's file widget, for a file that may have no URL.
+
+    A product file lives on `ProductFilesStorage`, which has no `base_url` on purpose (ADR-0001):
+    the only way to it is `DownloadFileView`, behind a token. The stock widget asks for the URL
+    twice - `is_initial()` in python and `<a href="{{ widget.value.url }}">` in the template - and
+    both raise ValueError, so the change page answered 500 instead of rendering the form.
+
+    The link is made conditional rather than dropped, so the widget stays correct for a field
+    whose storage does publish one (a preview, say) if it is ever pointed at this admin.
+    """
+
+    template_name = "catalog/widgets/product_file_input.html"
+
+    def is_initial(self, value):
+        """
+        "Is a file already stored" without asking for its URL.
+
+        Upstream reads `getattr(value, "url", False)`, which is the first of the two raises. A
+        stored file arrives as a `FieldFile`; a fresh upload is an `UploadedFile` and is not
+        initial, exactly as upstream treats it.
+        """
+
+        return isinstance(value, FieldFile) and bool(value)
+
+    def get_context(self, name, value, attrs):
+        context = super().get_context(name, value, attrs)
+        context["widget"]["value_url"] = self.value_url(context["widget"]["value"])
+
+        return context
+
+    @staticmethod
+    def value_url(value) -> str:
+        """
+        The file's URL, or "" when the storage does not hand one out.
+
+        Not a swallowed error: a storage without `base_url` is a designed state here, and the
+        template needs the answer as a value rather than as an exception. `NotImplementedError` is
+        what the base `Storage` raises, `ValueError` what `FileSystemStorage` raises.
+        """
+
+        if not isinstance(value, FieldFile) or not value:
+            return ""
+
+        try:
+            return value.url
+        except (ValueError, NotImplementedError):
+            return ""
 
 
 class ProductImageInline(admin.TabularInline):
@@ -24,7 +78,7 @@ class ProductImageInline(admin.TabularInline):
 
 @admin.register(Country)
 class CountryAdmin(SeoFieldsetMixin, TranslationAdmin):
-    list_display = ["flag", "name", "slug", "code", "products_count", "is_popular", "position"]
+    list_display = ["name", "flag", "slug", "code", "products_count", "is_popular", "position"]
     list_editable = ["is_popular", "position"]
     list_filter = ["is_popular"]
     search_fields = ["name_en", "name_ru", "slug", "code"]
@@ -64,6 +118,7 @@ class ProductAdmin(SeoFieldsetMixin, TranslationAdmin):
     prepopulated_fields = {"slug": ("name_en",)}
     inlines = [ProductImageInline]
     readonly_fields = ["created_at", "updated_at"]
+    formfield_overrides = {models.FileField: {"widget": ProductFileInput}}
 
     def get_queryset(self, request):
         return super().get_queryset(request).prefetch_related("images")
