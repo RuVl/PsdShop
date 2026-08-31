@@ -1,61 +1,27 @@
-import TranslatableModel from './TranslatableModel';
-import {useCurrenciesStore} from "@/stores/currencies.js";
-import {assign} from "lodash";
+import Localized from '@/models/Localized.js';
 
-export default class Product extends TranslatableModel {
-    constructor(data) {
-        super(data);
+// One catalog card, or the whole product page when the detail endpoint filled it in. A product is
+// a template sold any number of times (ADR-0001): no stock, no quantity, and the price is USD.
+export default class Product extends Localized {
+    static translated = ['name', 'description'];
 
-        this.id = data.id;
-        this.code = data.code; // Country code
-        this.price = data.price;
-        this._quantity = data._quantity;
-        this.max_quantity = data.max_quantity;
+    /** `$12.50` - the one place a price becomes text. */
+    get priceLabel() {
+        return `$${Number(this.price).toFixed(2)}`;
     }
 
-    get amount() {
-        const currenciesStore = useCurrenciesStore();
-        return currenciesStore.convert(this.price.amount, this.price.currency);
-    }
-
-    get quantity() {
-        return this._quantity;
-    }
-
-    set quantity(value) {
-        if (value < 1) {
-            this._quantity = 1;
-            return;
-        }
-        if (value > this.max_quantity) {
-            this._quantity = this.max_quantity;
-            return;
-        }
-        this._quantity = value;
-    }
-
-    static fromApi(product, country) {
-        const data = {
-            id: parseInt(product.id),
-            code: country.code,
-            price: {
-                amount: parseFloat(product.price),
-                currency: product.price_currency
+    /** A router target for this product; the `<id>-<slug>` segment is built by the server. */
+    route(lang) {
+        return {
+            name: 'product',
+            params: {
+                lang,
+                country: this.country,
+                type: this.document_type,
+                productSlug: this.url_slug,
             },
-            _quantity: 1, // default quantity to buy
-            max_quantity: parseInt(product.available),
         };
-
-        return new Product(assign(product, data));
-    }
-
-    formattedPrice(use_quantity = false) {
-        const currenciesStore = useCurrenciesStore();
-        const price = use_quantity ? this.amount * this._quantity : this.amount;
-        return `${price.toFixed(2)} ${currenciesStore.currentCurrency.sign}`;
-    }
-
-    getTranslationFields() {
-        return ['name'];
     }
 }
+
+Product.defineTranslations();

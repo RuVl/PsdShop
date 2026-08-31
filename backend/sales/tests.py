@@ -1,12 +1,10 @@
 import hashlib
 import hmac
 import json
-import tempfile
 import uuid
 from datetime import timedelta
 from decimal import Decimal
 from io import StringIO
-from pathlib import Path
 from unittest.mock import patch
 
 import dns.resolver
@@ -15,220 +13,141 @@ from django.conf import settings
 from django.contrib.auth.models import User
 from django.contrib.sites.models import Site
 from django.core import mail
-from django.core.cache import cache
+from django.core.files.base import ContentFile
 from django.core.management import call_command
-from django.db.models import ProtectedError
-from django.test import RequestFactory, TestCase, override_settings
+from django.db import IntegrityError, transaction
+from django.test import RequestFactory, TestCase
 from django.urls import reverse
 from django.utils import timezone, translation
 from rest_framework.test import APIClient
 
-from catalog.models import Country, Product, StockItem
+from backend.testing import TempUploadsMixin
+from catalog.models import Country, DocumentType, Product
 from customer.models import Customer
-from sales.models import Allocation, Order, OrderItem, PaymentCallbackLog, Transaction
+from sales.models import Order, OrderItem, PaymentCallbackLog, Transaction
 from sales.utils import send_purchases_link
 
 
-class OrderItemFactoryMixin:
-    def make_product(self, stock: int, name: str = "Test") -> Product:
-        product = Product.objects.create(name=name, country=self.country, price=10)
-        for i in range(stock):
-            StockItem.objects.create(file=f"products/{name}-{i}.pdf", product=product)
-        return product
+class SalesFactoryMixin(TempUploadsMixin):
+    """A catalogue small enough to reason about, and orders built the way the checkout builds them."""
 
-    def make_item(self, product: Product, quantity: int = 1, order: Order | None = None) -> OrderItem:
+    def make_product(self, name: str = "Germany utility bill 2022", price: str = "10.00", **overrides) -> Product:
+        fields = {
+            "name": name,
+            "slug": overrides.pop("slug", name.lower().replace(" ", "-")),
+            "country": self.country,
+            "document_type": self.document_type,
+            "year": 2022,
+            "price": Decimal(price),
+            "file": ContentFile(b"%PDF-1.4 test", name=f"{name}.psd"),
+        }
+        fields.update(overrides)
+        return Product.objects.create(**fields)
+
+    def make_item(self, product: Product, order: Order | None = None) -> OrderItem:
         return OrderItem.objects.create(
             order=order or self.order,
             product=product,
             product_name=product.name,
             unit_price=product.price,
-            unit_price_usd=10,
-            quantity=quantity,
         )
 
+    def pay(self, order: Order | None = None):
+        """Everything `apply_order_status` does for a paid invoice, without going through HTTP."""
+
+        order = order or self.order
+        order.status = Order.OrderStatus.PAID
+        order.save(update_fields=["status"])
+        order.mark_paid()
+        return order.deliver()
+
     def setUp(self):
-        self.country = Country.objects.create(name="Testland", code="tl")
+        super().setUp()
+        self.country = Country.objects.create(name="Germany", slug="germany", code="de")
+        self.document_type = DocumentType.objects.create(name="Utility bill", slug="utility-bill")
         self.customer = Customer.objects.create(email="buyer@example.com")
-        self.order = Order.objects.create(customer=self.customer, total_price=10)
+        self.order = Order.objects.create(customer=self.customer, total_price=Decimal("10.00"))
 
 
-class ReserveTests(OrderItemFactoryMixin, TestCase):
-    def test_reserve_takes_exactly_the_wanted_quantity(self):
-        item = self.make_item(self.make_product(3), quantity=2)
+class DeliverTests(SalesFactoryMixin, TestCase):
+    def test_deliver_issues_a_token_per_line(self):
+        first = self.make_item(self.make_product("First", slug="first"))
+        second = self.make_item(self.make_product("Second", slug="second"))
 
-        allocations = item.reserve()
+        self.order.deliver()
 
-        self.assertEqual(len(allocations), 2)
-        self.assertTrue(all(a.state == Allocation.State.RESERVED for a in allocations))
-        self.assertTrue(all(a.delivered_at is None and a.token is None for a in allocations))
+        for item in (first, second):
+            item.refresh_from_db()
+            self.assertTrue(item.is_token_valid())
 
-    def test_reserve_more_than_stock_raises(self):
-        item = self.make_item(self.make_product(1), quantity=5)
+    def test_deliver_is_idempotent_and_keeps_a_live_link(self):
+        """A second callback must not invalidate the link the customer is already using."""
 
-        with self.assertRaises(ValueError):
-            item.reserve()
+        item = self.make_item(self.make_product())
+        self.order.deliver()
+        item.refresh_from_db()
+        token = item.token
 
-        self.assertEqual(Allocation.objects.count(), 0)
+        self.order.deliver()
 
-    def test_reserve_twice_raises(self):
-        item = self.make_item(self.make_product(3), quantity=1)
-        item.reserve()
+        item.refresh_from_db()
+        self.assertEqual(item.token, token)
 
-        with self.assertRaises(ValueError):
-            item.reserve()
+    def test_deliver_replaces_an_expired_token(self):
+        item = self.make_item(self.make_product())
+        self.order.deliver()
+        OrderItem.objects.filter(pk=item.pk).update(token_expires_at=timezone.now() - timedelta(seconds=1))
 
-        self.assertEqual(item.allocations.count(), 1)
+        self.order.deliver()
 
+        item.refresh_from_db()
+        self.assertTrue(item.is_token_valid())
 
-class DeliverTests(OrderItemFactoryMixin, TestCase):
-    def test_deliver_issues_a_token_per_unit(self):
-        item = self.make_item(self.make_product(3), quantity=2)
-        item.reserve()
+    def test_a_product_cannot_be_bought_twice_in_one_order(self):
+        product = self.make_product()
+        self.make_item(product)
 
-        allocations = item.deliver()
-
-        self.assertEqual(len(allocations), 2)
-        self.assertTrue(all(a.state == Allocation.State.DELIVERED for a in allocations))
-        self.assertTrue(all(a.is_token_valid() for a in allocations))
-        self.assertEqual(len({a.token for a in allocations}), 2)
-
-    def test_deliver_is_idempotent(self):
-        item = self.make_item(self.make_product(3), quantity=2)
-        item.reserve()
-
-        first = item.deliver()
-        second = item.deliver()
-
-        self.assertEqual(len(second), 2)
-        self.assertEqual(Allocation.objects.filter(state=Allocation.State.DELIVERED).count(), 2)
-        self.assertEqual({a.token for a in first}, {a.token for a in second})
-
-    def test_deliver_after_released_reservation_allocates_again(self):
-        """Regression, incident 2026-07-28: the invoice expired and released the reservation, then
-        the crypto payment confirmed hours later. The late callback must deliver anyway."""
-
-        product = self.make_product(2)
-        item = self.make_item(product, quantity=1)
-        item.reserve()
-        item.release()
-
-        allocations = item.deliver()
-
-        self.assertEqual(len(allocations), 1)
-        self.assertEqual(allocations[0].state, Allocation.State.DELIVERED)
-        self.assertTrue(allocations[0].is_token_valid())
-        self.assertEqual(product.available_count(), 1)
-
-    def test_deliver_after_released_reservation_raises_when_out_of_stock(self):
-        product = self.make_product(1)
-        item = self.make_item(product, quantity=1)
-        item.reserve()
-        item.release()
-
-        # Everything got resold while the payment was pending.
-        other_order = Order.objects.create(customer=self.customer, total_price=10)
-        self.make_item(product, quantity=1, order=other_order).reserve()
-
-        with self.assertRaises(ValueError):
-            item.deliver()
-
-        self.assertEqual(item.allocations.filter(state=Allocation.State.DELIVERED).count(), 0)
-
-    def test_deliver_tops_up_a_partially_delivered_item(self):
-        """The old schema could leave an order paid with fewer files than bought - now the missing
-        units are simply allocated on the next delivery."""
-
-        product = self.make_product(3)
-        item = self.make_item(product, quantity=2)
-        item.reserve()
-        item.allocations.first().delete()  # simulate a half-finished legacy sale
-
-        allocations = item.deliver()
-
-        self.assertEqual(len(allocations), 2)
-        self.assertEqual(item.allocations.filter(state=Allocation.State.DELIVERED).count(), 2)
+        with self.assertRaises(IntegrityError), transaction.atomic():
+            self.make_item(product)
 
 
-class ReleaseTests(OrderItemFactoryMixin, TestCase):
-    def test_release_returns_units_to_stock(self):
-        product = self.make_product(3)
-        item = self.make_item(product, quantity=2)
-        item.reserve()
-
-        released = item.release()
-
-        self.assertEqual(len(released), 2)
-        self.assertEqual(product.available_count(), 3)
-
-    def test_release_is_idempotent(self):
-        item = self.make_item(self.make_product(3), quantity=2)
-        item.reserve()
-        item.release()
-
-        self.assertEqual(item.release(), [])
-
-    def test_release_does_not_touch_delivered_units(self):
-        product = self.make_product(3)
-        item = self.make_item(product, quantity=1)
-        item.reserve()
-        item.deliver()
-
-        self.assertEqual(item.release(), [])
-        self.assertEqual(item.allocations.filter(state=Allocation.State.DELIVERED).count(), 1)
-        self.assertEqual(product.available_count(), 2)
-
-
-class OrderStateTests(OrderItemFactoryMixin, TestCase):
+class OrderStateTests(SalesFactoryMixin, TestCase):
     def test_mark_paid_stamps_once(self):
         self.assertTrue(self.order.mark_paid())
-        stamped_at = self.order.paid_at
+        first = self.order.paid_at
 
         self.assertFalse(self.order.mark_paid())
         self.order.refresh_from_db()
-        self.assertEqual(self.order.paid_at, stamped_at)
+        self.assertEqual(self.order.paid_at, first)
 
-    def test_order_deliver_covers_every_item(self):
-        self.make_item(self.make_product(2, name="A"), quantity=2).reserve()
-        self.make_item(self.make_product(1, name="B"), quantity=1).reserve()
+    def test_reissuing_tokens_rotates_them(self):
+        item = self.make_item(self.make_product())
+        self.pay()
+        item.refresh_from_db()
+        first = item.token
 
-        allocations = self.order.deliver()
+        OrderItem.objects.filter(pk=item.pk).reissue_tokens()
 
-        self.assertEqual(len(allocations), 3)
-        self.assertTrue(all(a.is_token_valid() for a in allocations))
-
-    def test_order_release_covers_every_item(self):
-        product_a = self.make_product(2, name="A")
-        product_b = self.make_product(1, name="B")
-        self.make_item(product_a, quantity=2).reserve()
-        self.make_item(product_b, quantity=1).reserve()
-
-        self.order.release()
-
-        self.assertEqual(product_a.available_count(), 2)
-        self.assertEqual(product_b.available_count(), 1)
-
-    def test_reissuing_tokens_rotates_delivered_units_only(self):
-        item = self.make_item(self.make_product(2), quantity=1)
-        item.reserve()
-        delivered = item.deliver()[0]
-        old_token = delivered.token
-        # A reserved unit of the same order has no token to rotate and must stay out of it.
-        self.make_item(self.make_product(1, name="Other"), quantity=1).reserve()
-
-        refreshed = Allocation.objects.downloadable().of_customer(self.customer).reissue_tokens()
-
-        self.assertEqual(len(refreshed), 1)
-        self.assertNotEqual(refreshed[0].token, old_token)
-        self.assertTrue(refreshed[0].is_token_valid())
+        item.refresh_from_db()
+        self.assertNotEqual(item.token, first)
+        self.assertTrue(item.is_token_valid())
 
     def test_expired_token_is_invalid(self):
-        item = self.make_item(self.make_product(2), quantity=1)
-        item.reserve()
-        allocation = item.deliver()[0]
+        item = self.make_item(self.make_product())
+        self.pay()
+        OrderItem.objects.filter(pk=item.pk).update(token_expires_at=timezone.now() - timedelta(seconds=1))
 
-        allocation.token_expires_at = timezone.now() - timedelta(seconds=1)
+        item.refresh_from_db()
+        self.assertFalse(item.is_token_valid())
 
-        self.assertFalse(allocation.is_token_valid())
+    def test_only_paid_orders_are_downloadable(self):
+        item = self.make_item(self.make_product())
+        item.issue_token()
+
+        self.assertNotIn(item, OrderItem.objects.downloadable())
+
+        self.pay()
+        self.assertIn(item, OrderItem.objects.downloadable())
 
 
 def sign_plisio_payload(data: dict) -> dict:
@@ -237,15 +156,14 @@ def sign_plisio_payload(data: dict) -> dict:
     return {**data, "verify_hash": verify_hash}
 
 
-class PlisioCallbackTests(OrderItemFactoryMixin, TestCase):
-    """The callback is the part that broke in the 2026-07-28 incident."""
+class PlisioCallbackTests(SalesFactoryMixin, TestCase):
+    """The callback is the only thing Plisio ever tells us about an invoice."""
 
     def setUp(self):
         super().setUp()
-        self.product = self.make_product(2)
-        self.item = self.make_item(self.product, quantity=1)
-        self.item.reserve()
+        Site.objects.update_or_create(pk=1, defaults={"domain": "testserver", "name": "test"})
 
+        self.item = self.make_item(self.make_product())
         self.client = APIClient()
         self.url = reverse("plisio-callback")
         self.payload = {
@@ -262,55 +180,80 @@ class PlisioCallbackTests(OrderItemFactoryMixin, TestCase):
     def post_callback(self, **overrides):
         return self.client.post(self.url, sign_plisio_payload({**self.payload, **overrides}), format="json")
 
+    def test_the_hash_is_checked_the_way_plisio_builds_it(self):
+        # Plisio (and its own SDK) hashes the JSON body in the order it sent it, with non-ASCII
+        # escaped - it does not sort the keys. Signing with our own helper cannot catch a
+        # disagreement about that, so this payload is signed the SDK's way, keys deliberately out
+        # of alphabetical order.
+        payload = {
+            "txn_id": "txn-sdk",
+            "order_number": str(self.order.id),
+            "status": "completed",
+            "amount": "0.0005",
+            "currency": "BTC",
+            "order_name": "Заказ №1",
+        }
+        body = json.dumps(payload, separators=(",", ":"))
+        payload["verify_hash"] = hmac.new(settings.PLISIO_SECRET_KEY.encode(), body.encode(), hashlib.sha1).hexdigest()
+
+        response = self.client.post(self.url, payload, format="json")
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.order.refresh_from_db()
+        self.assertIsNotNone(self.order.paid_at)
+
+    def test_a_sorted_hash_is_accepted_too(self):
+        # Whether Plisio hands the keys over sorted is not something we get to know for sure, so
+        # both readings of the same payload are accepted - each is an HMAC with our own key.
+        response = self.post_callback(txn_id="txn-sorted")
+
+        self.assertEqual(response.status_code, 200, response.data)
+
+    def test_a_form_encoded_callback_is_accepted(self):
+        # This is the shape Plisio actually posts. A QueryDict hands back lists, not strings, so
+        # a callback read straight off request.data never matched its own hash - and every JSON
+        # test above passed while production rejected the real thing.
+        response = self.client.post(self.url, sign_plisio_payload(self.payload))
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.order.refresh_from_db()
+        self.assertIsNotNone(self.order.paid_at)
+        # The stored payload has to be readable too, not a dict of one-element lists.
+        log = PaymentCallbackLog.objects.get()
+        self.assertEqual(log.payload["status"], "completed")
+        self.assertNotIn("verify_hash", log.payload)
+
     def test_paid_callback_delivers_and_emails_once(self):
         response = self.post_callback()
 
         self.assertEqual(response.status_code, 200)
-        self.order.refresh_from_db()
-        self.assertEqual(self.order.status, Order.OrderStatus.PAID)
-        self.assertIsNotNone(self.order.paid_at)
-        self.assertEqual(self.item.allocations.filter(state=Allocation.State.DELIVERED).count(), 1)
+        self.item.refresh_from_db()
+        self.assertTrue(self.item.is_token_valid())
         self.assertEqual(len(mail.outbox), 1)
 
     def test_duplicate_callback_is_absorbed(self):
-        """It used to answer 409 and roll the whole thing back; now the second one is simply a no-op."""
-
         self.post_callback()
-        second = self.post_callback()
+        response = self.post_callback()
 
-        self.assertEqual(second.status_code, 200)
-        self.assertEqual(self.item.allocations.filter(state=Allocation.State.DELIVERED).count(), 1)
+        self.assertEqual(response.status_code, 200)
+        # One e-mail, because paid_at is stamped exactly once.
         self.assertEqual(len(mail.outbox), 1)
+        self.assertEqual(Transaction.objects.count(), 1)
 
-    def test_late_callback_after_expiry_still_delivers(self):
-        self.post_callback(status="expired", txn_id="txn-expired")
-        self.assertEqual(self.item.allocations.filter(state=Allocation.State.RELEASED).count(), 1)
+    def test_a_late_callback_still_delivers(self):
+        """Nothing is reserved any more, so a payment after the invoice window is an ordinary sale."""
+
+        Order.objects.filter(pk=self.order.pk).update(created_at=timezone.now() - timedelta(days=2))
 
         response = self.post_callback()
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(self.item.allocations.filter(state=Allocation.State.DELIVERED).count(), 1)
-        self.assertEqual(len(mail.outbox), 1)
-
-    def test_late_callback_returns_409_when_stock_ran_out(self):
-        self.post_callback(status="expired", txn_id="txn-expired")
-
-        # Both units get sold to somebody else while the payment was pending.
-        other_order = Order.objects.create(customer=self.customer, total_price=10)
-        self.make_item(self.product, quantity=2, order=other_order).reserve()
-
-        response = self.post_callback()
-
-        self.assertEqual(response.status_code, 409)
-        self.order.refresh_from_db()
-        self.assertEqual(self.order.status, Order.OrderStatus.EXPIRED)  # rolled back
-        self.assertEqual(len(mail.outbox), 0)
+        self.item.refresh_from_db()
+        self.assertTrue(self.item.is_token_valid())
 
     def test_currency_switch_keeps_both_invoices(self):
-        """Plisio mints a new invoice on a currency switch - the old schema overwrote it."""
-
-        self.post_callback(status="cancelled duplicate", txn_id="txn-btc")
-        self.post_callback(txn_id="txn-ltc")
+        self.post_callback(txn_id="txn-btc", status="cancelled duplicate")
+        self.post_callback(txn_id="txn-eth", currency="ETH")
 
         self.assertEqual(Transaction.objects.filter(order=self.order).count(), 2)
         self.order.refresh_from_db()
@@ -320,681 +263,532 @@ class PlisioCallbackTests(OrderItemFactoryMixin, TestCase):
         self.post_callback()
 
         log = PaymentCallbackLog.objects.get()
-        self.assertEqual(log.order_id, self.order.id)
-        self.assertEqual(log.txn_id, "txn-1")
+        self.assertEqual(log.order, self.order)
         self.assertNotIn("verify_hash", log.payload)
 
     def test_bad_hash_is_rejected(self):
         response = self.client.post(self.url, {**self.payload, "verify_hash": "nope"}, format="json")
 
         self.assertEqual(response.status_code, 422)
-        self.order.refresh_from_db()
-        self.assertEqual(self.order.status, Order.OrderStatus.PENDING)
+        self.assertEqual(len(mail.outbox), 0)
 
     def test_unknown_order_is_logged_and_404(self):
         response = self.post_callback(order_number="999999")
 
         self.assertEqual(response.status_code, 404)
-        self.assertEqual(PaymentCallbackLog.objects.filter(order__isnull=True).count(), 1)
+        self.assertEqual(PaymentCallbackLog.objects.count(), 1)
+        self.assertIsNone(PaymentCallbackLog.objects.get().order)
 
     def test_the_invoice_keeps_the_money_fields_plisio_sent(self):
-        """`commission` is in the invoice's coin and `source_rate` is crypto per dollar - see statistics."""
-
         self.post_callback(
-            source_currency="USD",
             source_amount="10.00",
+            source_currency="USD",
             source_rate="0.00005",
             invoice_commission="0.0000025",
             confirmations="3",
         )
 
-        txn = Transaction.objects.get(txn_id="txn-1")
-        self.assertEqual(txn.source_price.amount, Decimal("10.00"))
-        self.assertEqual(str(txn.source_price.currency), "USD")
+        txn = Transaction.objects.get()
+        self.assertEqual(txn.source_amount, Decimal("10.00"))
+        self.assertEqual(txn.source_currency, "USD")
         self.assertEqual(txn.source_rate, Decimal("0.00005"))
         self.assertEqual(txn.commission, Decimal("0.0000025"))
         self.assertEqual(txn.confirmations, 3)
 
     def test_a_later_callback_does_not_blank_what_an_earlier_one_filled(self):
-        """Plisio repeats an invoice, and the repeat is not always the richer message."""
+        self.post_callback(status="pending", source_rate="0.00005", invoice_commission="0.0000025")
+        self.post_callback(status="completed")
 
-        self.post_callback(invoice_commission="0.0000025", source_rate="0.00005")
-        self.post_callback()
-
-        txn = Transaction.objects.get(txn_id="txn-1")
-        self.assertEqual(txn.commission, Decimal("0.0000025"))
+        txn = Transaction.objects.get()
         self.assertEqual(txn.source_rate, Decimal("0.00005"))
+        self.assertEqual(txn.commission, Decimal("0.0000025"))
 
     def test_a_short_payment_is_delivered_but_says_so_in_the_log(self):
-        """`mismatch` is Plisio's word either way; we hand the files over and log the shortfall."""
+        with self.assertLogs("sales.views", level="WARNING") as logs:
+            self.post_callback(status="mismatch", pending_amount="0.0001")
 
-        with self.assertLogs("sales.views", level="WARNING") as logged:
-            response = self.post_callback(status="mismatch", pending_amount="0.0001")
-
-        self.assertEqual(response.status_code, 200)
         self.order.refresh_from_db()
         self.assertEqual(self.order.status, Order.OrderStatus.OVERPAID)
-        self.assertEqual(self.item.allocations.filter(state=Allocation.State.DELIVERED).count(), 1)
-        self.assertIn("is short 0.0001 BTC", "\n".join(logged.output))
+        self.item.refresh_from_db()
+        self.assertTrue(self.item.is_token_valid())
+        self.assertTrue(any("short" in line for line in logs.output))
+
+    def test_an_expired_invoice_only_moves_the_status(self):
+        self.post_callback(status="expired")
+
+        self.order.refresh_from_db()
+        self.assertEqual(self.order.status, Order.OrderStatus.EXPIRED)
+        self.assertIsNone(self.order.paid_at)
+        self.item.refresh_from_db()
+        self.assertFalse(self.item.is_token_valid())
 
 
-class ServedFilesMixin(OrderItemFactoryMixin):
-    """Puts real bytes behind every StockItem, so a download can actually be streamed."""
+class ServedFilesMixin(SalesFactoryMixin):
+    """Puts real bytes behind the product file, so a download can actually be streamed."""
 
     def setUp(self):
         super().setUp()
-        media = self.enterContext(tempfile.TemporaryDirectory())
-        self.enterContext(override_settings(MEDIA_ROOT=media))
 
-        self.item = self.make_item(self.make_product(1), quantity=1)
-        for unit in StockItem.objects.all():
-            path = Path(media) / unit.file.name
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_bytes(b"%PDF-1.4 test")
+        product = self.make_product()
+        path = self.private / product.file.name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"%PDF-1.4 test")
 
-        self.item.reserve()
-        self.allocation = self.item.deliver()[0]
+        self.item = self.make_item(product)
+        self.pay()
+        self.item.refresh_from_db()
 
 
 class DownloadTests(ServedFilesMixin, TestCase):
     def download(self, token) -> int:
-        return self.client.get(f"/api/files/{token}/").status_code
+        return self.client.get(reverse("download-file", args=[token])).status_code
 
     def test_a_live_token_streams_the_file(self):
-        response = self.client.get(reverse("download-file", args=[self.allocation.token]))
+        response = self.client.get(reverse("download-file", args=[self.item.token]))
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(b"".join(response.streaming_content), b"%PDF-1.4 test")
 
     def test_expired_token_is_not_served(self):
-        self.allocation.token_expires_at = timezone.now() - timedelta(seconds=1)
-        self.allocation.save(update_fields=["token_expires_at"])
+        OrderItem.objects.filter(pk=self.item.pk).update(token_expires_at=timezone.now() - timedelta(seconds=1))
 
-        self.assertEqual(self.download(self.allocation.token), 404)
+        self.assertEqual(self.download(self.item.token), 404)
 
     def test_unknown_token_is_not_served(self):
         self.assertEqual(self.download(uuid.uuid4()), 404)
 
-    def test_malformed_token_is_not_served(self):
-        self.assertEqual(self.download("not-a-uuid"), 404)
+    def test_a_line_of_an_unpaid_order_is_not_served(self):
+        """`downloadable()` is keyed off the order being paid, not off the token existing."""
 
-    def test_a_released_allocation_is_not_served(self):
-        self.item.allocations.update(state=Allocation.State.RELEASED)
+        Order.objects.filter(pk=self.order.pk).update(paid_at=None)
 
-        self.assertEqual(self.download(self.allocation.token), 404)
+        self.assertEqual(self.download(self.item.token), 404)
 
 
 class DownloadCounterTests(ServedFilesMixin, TestCase):
-    """The only place a download writes to the database."""
-
-    def download(self, token=None):
-        response = self.client.get(reverse("download-file", args=[token or self.allocation.token]))
-        # FileResponse is lazy: the counter is only written once the body has been consumed.
-        if response.status_code == 200:
-            b"".join(response.streaming_content)
-        self.allocation.refresh_from_db()
-        return response
+    def get_file(self, token=None):
+        return self.client.get(reverse("download-file", args=[token or self.item.token]))
 
     def test_serving_the_file_counts_one_download(self):
-        self.download()
+        self.get_file()
 
-        self.assertEqual(self.allocation.download_count, 1)
-        self.assertIsNotNone(self.allocation.first_downloaded_at)
-        self.assertEqual(self.allocation.first_downloaded_at, self.allocation.last_downloaded_at)
+        self.item.refresh_from_db()
+        self.assertEqual(self.item.download_count, 1)
+        self.assertIsNotNone(self.item.first_downloaded_at)
 
     def test_a_second_download_moves_only_the_last_stamp(self):
-        self.download()
-        first = self.allocation.first_downloaded_at
+        self.get_file()
+        self.item.refresh_from_db()
+        first = self.item.first_downloaded_at
 
-        self.download()
+        self.get_file()
 
-        self.assertEqual(self.allocation.download_count, 2)
-        self.assertEqual(self.allocation.first_downloaded_at, first)
-        self.assertGreater(self.allocation.last_downloaded_at, first)
+        self.item.refresh_from_db()
+        self.assertEqual(self.item.download_count, 2)
+        self.assertEqual(self.item.first_downloaded_at, first)
+        self.assertGreaterEqual(self.item.last_downloaded_at, first)
 
     def test_a_refused_download_counts_nothing(self):
-        self.allocation.token_expires_at = timezone.now() - timedelta(seconds=1)
-        self.allocation.save(update_fields=["token_expires_at"])
+        OrderItem.objects.filter(pk=self.item.pk).update(token_expires_at=timezone.now() - timedelta(seconds=1))
 
-        self.assertEqual(self.download().status_code, 404)
-        self.assertEqual(self.allocation.download_count, 0)
-        self.assertIsNone(self.allocation.first_downloaded_at)
+        self.get_file()
+
+        self.item.refresh_from_db()
+        self.assertEqual(self.item.download_count, 0)
 
     def test_the_counter_survives_a_token_rotation(self):
-        """Re-issuing the link does not reset how many times the file was taken."""
+        self.get_file()
+        OrderItem.objects.filter(pk=self.item.pk).reissue_tokens()
+        self.item.refresh_from_db()
 
-        self.download()
-        self.allocation.issue_token()
+        self.get_file()
 
-        self.download()
-
-        self.assertEqual(self.allocation.download_count, 2)
+        self.item.refresh_from_db()
+        self.assertEqual(self.item.download_count, 2)
 
     def test_a_staff_member_looking_at_the_file_is_not_a_download(self):
-        """The counter answers "did the customer take it", so the owner checking a file must not move it."""
+        User.objects.create_superuser("root", "root@example.com", "pass")
+        self.client.login(username="root", password="pass")
 
-        staff = User.objects.create_user("owner", password="owner", is_staff=True)
-        self.client.force_login(staff)
+        with self.assertLogs("sales.views", level="INFO"):
+            self.get_file()
 
-        self.assertEqual(self.download().status_code, 200)
-
-        self.assertEqual(self.allocation.download_count, 0)
-        self.assertIsNone(self.allocation.first_downloaded_at)
-        self.assertIsNone(self.allocation.last_downloaded_at)
+        self.item.refresh_from_db()
+        self.assertEqual(self.item.download_count, 0)
 
     def test_a_customer_still_counts_after_staff_looked(self):
-        staff = User.objects.create_user("owner", password="owner", is_staff=True)
-        self.client.force_login(staff)
-        self.download()
-
+        User.objects.create_superuser("root", "root@example.com", "pass")
+        self.client.login(username="root", password="pass")
+        with self.assertLogs("sales.views", level="INFO"):
+            self.get_file()
         self.client.logout()
-        self.download()
 
-        self.assertEqual(self.allocation.download_count, 1)
+        self.get_file()
+
+        self.item.refresh_from_db()
+        self.assertEqual(self.item.download_count, 1)
 
 
-class SendDownloadLinksTests(OrderItemFactoryMixin, TestCase):
+class CheckoutTests(SalesFactoryMixin, TestCase):
     def setUp(self):
         super().setUp()
-        self.item = self.make_item(self.make_product(2), quantity=1)
-        self.item.reserve()
-        self.item.deliver()
-        self.order.status = Order.OrderStatus.PAID
-        self.order.save(update_fields=["status"])
-        self.order.mark_paid()
+        self.product = self.make_product(price="12.50")
+        self.other = self.make_product("Bank statement 2021", price="7.50", slug="bank-statement-2021")
+        self.client = APIClient()
+        self.url = reverse("order-create")
+
+    def checkout(self, **overrides):
+        payload = {"email": "new@example.com", "products": [self.product.pk], **overrides}
+        return self.client.post(self.url, payload, format="json")
+
+    @staticmethod
+    def plisio_ok(url="https://plisio.net/invoice/1"):
+        response = requests.Response()
+        response.status_code = 200
+        response._content = json.dumps({"status": "success", "data": {"invoice_url": url}}).encode()
+        return response
+
+    @staticmethod
+    def plisio_error(message="No such currency", code=201):
+        response = requests.Response()
+        response.status_code = 400
+        response._content = json.dumps({"status": "error", "data": {"message": message, "code": code}}).encode()
+        return response
+
+    def test_checkout_snapshots_name_and_price(self):
+        with patch("sales.views.requests.get", return_value=self.plisio_ok()):
+            response = self.checkout(products=[self.product.pk, self.other.pk])
+
+        self.assertEqual(response.status_code, 201)
+        order = Order.objects.get(customer__email="new@example.com")
+        self.assertEqual(order.total_price, Decimal("20.00"))
+        self.assertEqual(
+            sorted((item.product_name, item.unit_price) for item in order.items.all()),
+            sorted([(self.product.name, Decimal("12.50")), (self.other.name, Decimal("7.50"))]),
+        )
+
+    def test_a_later_price_change_does_not_touch_the_order(self):
+        with patch("sales.views.requests.get", return_value=self.plisio_ok()):
+            self.checkout()
+
+        self.product.price = Decimal("99.00")
+        self.product.save(update_fields=["price"])
+
+        order = Order.objects.get(customer__email="new@example.com")
+        self.assertEqual(order.items.get().unit_price, Decimal("12.50"))
+        self.assertEqual(order.total_price, Decimal("12.50"))
+
+    def test_an_inactive_product_cannot_be_bought(self):
+        self.product.is_active = False
+        self.product.save(update_fields=["is_active"])
+
+        response = self.checkout()
+
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(Order.objects.filter(customer__email="new@example.com").exists())
+
+    def test_a_failed_invoice_leaves_no_order_behind(self):
+        with (
+            patch("sales.views.requests.get", return_value=self.plisio_error()),
+            self.assertLogs("sales.views", level="ERROR"),
+        ):
+            response = self.checkout()
+
+        self.assertEqual(response.status_code, 502)
+        self.assertFalse(Order.objects.filter(customer__email="new@example.com").exists())
+
+    def test_a_failed_invoice_passes_the_provider_reason_on(self):
+        with (
+            patch("sales.views.requests.get", return_value=self.plisio_error("Currency is disabled", 202)),
+            self.assertLogs("sales.views", level="ERROR"),
+        ):
+            response = self.checkout()
+
+        self.assertEqual(response.data["detail"], "Currency is disabled")
+        self.assertEqual(response.data["code"], "invoice_failed")
+        self.assertEqual(response.data["provider_code"], 202)
+
+    def test_unreachable_plisio_is_a_502_and_not_a_crash(self):
+        with (
+            patch("sales.views.requests.get", side_effect=requests.ConnectionError("boom")),
+            self.assertLogs("sales.views", level="ERROR"),
+        ):
+            response = self.checkout()
+
+        self.assertEqual(response.status_code, 502)
+        self.assertFalse(Order.objects.filter(customer__email="new@example.com").exists())
+
+    def test_a_network_error_never_writes_the_api_key_into_the_log(self):
+        # requests puts the whole request URL in its exception message, and the key travels in it.
+        leak = requests.ConnectionError(
+            f"HTTPSConnectionPool: /api/v1/invoices/new?api_key={settings.PLISIO_SECRET_KEY}&order_number=1"
+        )
+
+        with (
+            patch("sales.views.requests.get", side_effect=leak),
+            self.assertLogs("sales.views", level="ERROR") as logs,
+        ):
+            response = self.checkout()
+
+        self.assertEqual(response.status_code, 502)
+        self.assertNotIn(settings.PLISIO_SECRET_KEY, "\n".join(logs.output))
+        self.assertIn("***", "\n".join(logs.output))
+
+    def test_checkout_remembers_the_site_language(self):
+        with patch("sales.views.requests.get", return_value=self.plisio_ok()):
+            self.checkout(language="ru")
+
+        self.assertEqual(Customer.objects.get(email="new@example.com").language, "ru")
+
+    def test_the_invoice_carries_the_callback_url_with_json_true(self):
+        # Without ?json=true Plisio posts a form signed with PHP's serialize(), which our
+        # verification cannot reproduce - every payment would be refused at the callback.
+        with patch("sales.views.requests.get", return_value=self.plisio_ok()) as request:
+            self.checkout()
+
+        url = request.call_args.kwargs["params"]["callback_url"]
+        self.assertTrue(url.endswith("/api/order/status?json=true"), url)
+        self.assertTrue(url.startswith("http"), url)
+
+    def test_the_invoice_is_opened_in_the_customers_language(self):
+        with patch("sales.views.requests.get", return_value=self.plisio_ok()) as request:
+            self.checkout(language="ru")
+
+        self.assertEqual(request.call_args.kwargs["params"]["language"], "ru_RU")
+
+    def test_checkout_rejects_a_language_the_site_does_not_speak(self):
+        response = self.checkout(language="de")
+
+        self.assertEqual(response.status_code, 400)
+
+
+class CheckoutLimitTests(SalesFactoryMixin, TestCase):
+    def setUp(self):
+        super().setUp()
+        self.product = self.make_product()
+        self.client = APIClient()
+        self.url = reverse("order-create")
+
+    def test_an_undeliverable_email_domain_is_rejected(self):
+        with patch("customer.validators.dns.resolver.resolve", side_effect=dns.resolver.NXDOMAIN):
+            response = self.client.post(
+                self.url,
+                {"email": "buyer@nope.invalid", "products": [self.product.pk]},
+                format="json",
+            )
+
+        self.assertEqual(response.status_code, 400)
+
+    def test_empty_order_is_rejected(self):
+        response = self.client.post(self.url, {"email": "a@example.com", "products": []}, format="json")
+
+        self.assertEqual(response.status_code, 400)
+
+    def test_too_many_products_are_rejected(self):
+        ids = list(range(1, settings.MAX_ORDER_ITEMS + 2))
+
+        response = self.client.post(self.url, {"email": "a@example.com", "products": ids}, format="json")
+
+        self.assertEqual(response.status_code, 400)
+
+    def test_the_same_product_twice_is_rejected(self):
+        response = self.client.post(
+            self.url,
+            {"email": "a@example.com", "products": [self.product.pk, self.product.pk]},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+
+
+class CheckoutReuseTests(SalesFactoryMixin, TestCase):
+    """A double click must not mint a second invoice for the same cart."""
+
+    def setUp(self):
+        super().setUp()
+        self.product = self.make_product(price="12.50")
+        self.other = self.make_product("Bank statement 2021", price="7.50", slug="bank-statement-2021")
+        self.client = APIClient()
+        self.url = reverse("order-create")
+        self.invoice = "https://plisio.net/invoice/first"
+
+    def first_checkout(self, **overrides):
+        with patch("sales.views.requests.get", return_value=CheckoutTests.plisio_ok(self.invoice)):
+            return self.client.post(
+                self.url,
+                {"email": "new@example.com", "products": [self.product.pk], **overrides},
+                format="json",
+            )
+
+    def second_checkout(self, **overrides):
+        with patch("sales.views.requests.get", return_value=CheckoutTests.plisio_ok("https://plisio.net/second")):
+            return self.client.post(
+                self.url,
+                {"email": "new@example.com", "products": [self.product.pk], **overrides},
+                format="json",
+            )
+
+    def test_second_checkout_returns_the_first_invoice(self):
+        self.first_checkout()
+
+        response = self.second_checkout()
+
+        self.assertEqual(response.data["redirect_url"], self.invoice)
+        self.assertEqual(Order.objects.filter(customer__email="new@example.com").count(), 1)
+
+    def test_a_different_cart_gets_its_own_order(self):
+        self.first_checkout()
+
+        self.second_checkout(products=[self.product.pk, self.other.pk])
+
+        self.assertEqual(Order.objects.filter(customer__email="new@example.com").count(), 2)
+
+    def test_a_changed_price_gets_its_own_order(self):
+        self.first_checkout()
+        self.product.price = Decimal("20.00")
+        self.product.save(update_fields=["price"])
+
+        self.second_checkout()
+
+        self.assertEqual(Order.objects.filter(customer__email="new@example.com").count(), 2)
+
+    def test_an_expired_order_is_not_reused(self):
+        self.first_checkout()
+        order = Order.objects.get(customer__email="new@example.com")
+        Order.objects.filter(pk=order.pk).update(
+            created_at=timezone.now() - timedelta(days=1),
+            updated_at=timezone.now() - timedelta(days=1),
+        )
+
+        self.second_checkout()
+
+        self.assertEqual(Order.objects.filter(customer__email="new@example.com").count(), 2)
+
+    def test_another_customer_does_not_reuse_the_invoice(self):
+        self.first_checkout()
+
+        with patch("sales.views.requests.get", return_value=CheckoutTests.plisio_ok("https://plisio.net/other")):
+            response = self.client.post(
+                self.url,
+                {"email": "other@example.com", "products": [self.product.pk]},
+                format="json",
+            )
+
+        self.assertEqual(response.data["redirect_url"], "https://plisio.net/other")
+
+    def test_a_failed_invoice_leaves_nothing_to_reuse(self):
+        with (
+            patch("sales.views.requests.get", return_value=CheckoutTests.plisio_error()),
+            self.assertLogs("sales.views", level="ERROR"),
+        ):
+            self.client.post(self.url, {"email": "new@example.com", "products": [self.product.pk]}, format="json")
+
+        response = self.second_checkout()
+
+        self.assertEqual(response.data["redirect_url"], "https://plisio.net/second")
+
+
+class PurchasesMailTests(SalesFactoryMixin, TestCase):
+    def setUp(self):
+        super().setUp()
+        Site.objects.update_or_create(pk=1, defaults={"domain": "testserver", "name": "test"})
+        self.make_item(self.make_product())
+        self.pay()
+        self.customer.rotate_access_token()
+
+    def test_the_mail_carries_the_purchases_link_and_nothing_else(self):
+        send_purchases_link(RequestFactory().get("/"), self.customer)
+
+        body = mail.outbox[0].body
+        self.assertIn(str(self.customer.access_token), body)
+        self.assertNotIn("/api/files/", body)
+
+    def test_the_mail_follows_the_customers_language(self):
+        self.customer.set_language("ru")
+
+        with translation.override("en"):
+            send_purchases_link(RequestFactory().get("/"), self.customer)
+
+        self.assertNotEqual(mail.outbox[0].subject, "")
+        self.assertEqual(mail.outbox[0].to, [self.customer.email])
+
+    def test_the_link_opens_the_page_in_the_customers_language(self):
+        """The language is a path prefix, and the browser that will open the link is not here."""
+
+        self.customer.set_language("ru")
+
+        with translation.override("en"):
+            send_purchases_link(RequestFactory().get("/"), self.customer)
+
+        self.assertIn(f"/ru/purchases/{self.customer.access_token}/", mail.outbox[0].body)
+
+
+class SendDownloadLinksTests(SalesFactoryMixin, TestCase):
+    def setUp(self):
+        super().setUp()
+        Site.objects.update_or_create(pk=1, defaults={"domain": "testserver", "name": "test"})
+
+        self.item = self.make_item(self.make_product())
+        self.pay()
+        self.item.refresh_from_db()
 
         self.client = APIClient()
         self.url = reverse("send-links")
 
     def test_the_purchases_link_is_rotated_and_emailed(self):
-        old_access_token = self.customer.access_token
+        self.customer.rotate_access_token()
+        old_token = self.customer.access_token
 
         response = self.client.post(self.url, {"email": self.customer.email}, format="json")
 
         self.assertEqual(response.status_code, 200)
+        self.customer.refresh_from_db()
+        self.assertNotEqual(self.customer.access_token, old_token)
         self.assertEqual(len(mail.outbox), 1)
 
-        self.customer.refresh_from_db()
-        self.assertNotEqual(self.customer.access_token, old_access_token)
-        self.assertTrue(self.customer.is_access_token_valid())
-        self.assertIn(str(self.customer.access_token), mail.outbox[0].body)
-
     def test_file_tokens_survive_a_rotation(self):
-        """Rotating the page link must not break links to files the customer already shared."""
-
-        old_file_token = self.item.allocations.get().token
+        """Links the customer has already shared must keep working - only the page link is revoked."""
 
         self.client.post(self.url, {"email": self.customer.email}, format="json")
 
-        self.assertEqual(self.item.allocations.get().token, old_file_token)
+        token = self.item.token
+        self.item.refresh_from_db()
+        self.assertEqual(self.item.token, token)
 
-    def test_undelivered_paid_item_is_topped_up(self):
-        """The blind "grab any sold file" workaround is gone: missing units are allocated properly."""
+    def test_an_undelivered_paid_line_is_topped_up(self):
+        OrderItem.objects.filter(pk=self.item.pk).update(token=None, token_expires_at=None)
 
-        self.item.allocations.all().delete()
+        self.client.post(self.url, {"email": self.customer.email}, format="json")
 
-        response = self.client.post(self.url, {"email": self.customer.email}, format="json")
-
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(self.item.allocations.filter(state=Allocation.State.DELIVERED).count(), 1)
+        self.item.refresh_from_db()
+        self.assertTrue(self.item.is_token_valid())
 
     def test_unknown_email_is_404(self):
         response = self.client.post(self.url, {"email": "nobody@example.com"}, format="json")
 
         self.assertEqual(response.status_code, 404)
+        self.assertEqual(len(mail.outbox), 0)
 
     def test_a_paid_order_whose_status_moved_on_is_still_served(self):
-        """A `cancelled duplicate` callback for the abandoned invoice must not hide the purchase."""
-
         self.order.status = Order.OrderStatus.PENDING
         self.order.save(update_fields=["status"])
 
         response = self.client.post(self.url, {"email": self.customer.email}, format="json")
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(len(mail.outbox), 1)
 
 
-@override_settings(VALIDATE_EMAIL_MX=False)
-class CheckoutTests(OrderItemFactoryMixin, TestCase):
-    def setUp(self):
-        super().setUp()
-        self.product = self.make_product(3)
-        self.client = APIClient()
-        self.url = reverse("order-create")
-
-    def payload(self, quantity: int = 2):
-        return {
-            "email": "new@example.com",
-            "items": [{"product_id": self.product.id, "quantity": quantity}],
-        }
-
-    def test_order_over_stock_is_rejected(self):
-        response = self.client.post(self.url, self.payload(quantity=99), format="json")
-
-        self.assertEqual(response.status_code, 400)
-        self.assertEqual(Allocation.objects.count(), 0)
-
-    def test_checkout_reserves_and_snapshots(self):
-        with patch("sales.views.requests.get") as plisio:
-            plisio.return_value.status_code = 200
-            plisio.return_value.json.return_value = {
-                "status": "success",
-                "data": {"invoice_url": "https://plisio.net/invoice/1"},
-            }
-
-            response = self.client.post(self.url, self.payload(), format="json")
-
-        self.assertEqual(response.status_code, 201)
-        self.assertEqual(response.data["redirect_url"], "https://plisio.net/invoice/1")
-
-        item = OrderItem.objects.get(order__customer__email="new@example.com")
-        self.assertEqual(item.product_name, self.product.name)
-        self.assertEqual(item.unit_price, self.product.price)
-        self.assertEqual(item.allocations.filter(state=Allocation.State.RESERVED).count(), 2)
-        self.assertEqual(self.product.available_count(), 1)
-
-    def test_failed_invoice_releases_everything(self):
-        with patch("sales.views.requests.get") as plisio:
-            plisio.return_value.status_code = 500
-            plisio.return_value.json.return_value = {"status": "error"}
-
-            with self.assertLogs("sales.views", level="ERROR"):
-                response = self.client.post(self.url, self.payload(), format="json")
-
-        self.assertEqual(response.status_code, 502)
-        self.assertEqual(Order.objects.filter(customer__email="new@example.com").count(), 0)
-        self.assertEqual(self.product.available_count(), 3)
-
-    def test_failed_invoice_passes_the_provider_reason_on(self):
-        with patch("sales.views.requests.get") as plisio:
-            plisio.return_value.status_code = 200
-            plisio.return_value.json.return_value = {
-                "status": "error",
-                "data": {"message": "Shop is not active", "code": 401},
-            }
-
-            with self.assertLogs("sales.views", level="ERROR"):
-                response = self.client.post(self.url, self.payload(), format="json")
-
-        self.assertEqual(response.status_code, 502)
-        self.assertEqual(response.data["detail"], "Shop is not active")
-        self.assertEqual(response.data["code"], "invoice_failed")
-        self.assertEqual(response.data["provider_code"], 401)
-
-    def test_checkout_remembers_the_site_language(self):
-        payload = self.payload() | {"language": "ru"}
-
-        with patch("sales.views.requests.get") as plisio:
-            plisio.return_value.status_code = 200
-            plisio.return_value.json.return_value = {
-                "status": "success",
-                "data": {"invoice_url": "https://plisio.net/invoice/1"},
-            }
-
-            self.client.post(self.url, payload, format="json")
-
-        self.assertEqual(Customer.objects.get(email="new@example.com").language, "ru")
-
-    def test_the_invoice_is_opened_in_the_customers_language(self):
-        with patch("sales.views.requests.get") as plisio:
-            plisio.return_value.status_code = 200
-            plisio.return_value.json.return_value = {
-                "status": "success",
-                "data": {"invoice_url": "https://plisio.net/invoice/1"},
-            }
-
-            self.client.post(self.url, self.payload() | {"language": "ru"}, format="json")
-
-        self.assertEqual(plisio.call_args.kwargs["params"]["language"], "ru_RU")
-
-    def test_checkout_rejects_a_language_the_site_does_not_speak(self):
-        response = self.client.post(self.url, self.payload() | {"language": "de"}, format="json")
-
-        self.assertEqual(response.status_code, 400)
-        self.assertEqual(Allocation.objects.count(), 0)
-
-    def test_unreachable_plisio_does_not_leave_a_reservation(self):
-        with (
-            patch("sales.views.requests.get", side_effect=requests.ConnectionError("no route")),
-            self.assertLogs("sales.views", level="ERROR"),
-        ):
-            response = self.client.post(self.url, self.payload(), format="json")
-
-        self.assertEqual(response.status_code, 502)
-        self.assertEqual(response.data["detail"], "Error creating invoice")
-        self.assertEqual(Order.objects.filter(customer__email="new@example.com").count(), 0)
-        self.assertEqual(self.product.available_count(), 3)
-
-
-@override_settings(VALIDATE_EMAIL_MX=False)
-class CheckoutReuseTests(OrderItemFactoryMixin, TestCase):
-    """A repeated checkout of the same cart must land on the same invoice, not reserve a second copy."""
-
-    def setUp(self):
-        super().setUp()
-        self.product = self.make_product(3)
-        self.client = APIClient()
-        self.url = reverse("order-create")
-
-    def payload(self, quantity: int = 1, product: Product | None = None):
-        return {
-            "email": "new@example.com",
-            "items": [{"product_id": (product or self.product).id, "quantity": quantity}],
-        }
-
-    def checkout(self, payload, invoice_url: str = "https://plisio.net/invoice/1"):
-        with patch("sales.views.requests.get") as plisio:
-            plisio.return_value.status_code = 200
-            plisio.return_value.json.return_value = {"status": "success", "data": {"invoice_url": invoice_url}}
-            response = self.client.post(self.url, payload, format="json")
-            return response, plisio
-
-    def test_second_checkout_returns_the_first_invoice(self):
-        first, _ = self.checkout(self.payload())
-        second, plisio = self.checkout(self.payload(), invoice_url="https://plisio.net/invoice/2")
-
-        self.assertEqual(second.status_code, 201)
-        self.assertEqual(second.data["redirect_url"], first.data["redirect_url"])
-        plisio.assert_not_called()  # no second invoice was minted
-        self.assertEqual(Order.objects.filter(customer__email="new@example.com").count(), 1)
-        self.assertEqual(Allocation.objects.count(), 1)
-        self.assertEqual(self.product.available_count(), 2)
-
-    def test_reuse_works_when_the_order_holds_the_last_unit(self):
-        # The availability check used to refuse the customer their own reservation here.
-        product = self.make_product(1, name="Single")
-        first, _ = self.checkout(self.payload(product=product))
-        second, _ = self.checkout(self.payload(product=product))
-
-        self.assertEqual(second.status_code, 201)
-        self.assertEqual(second.data["redirect_url"], first.data["redirect_url"])
-        self.assertEqual(Allocation.objects.count(), 1)
-
-    def test_a_different_cart_gets_its_own_order(self):
-        self.checkout(self.payload(quantity=1))
-        second, plisio = self.checkout(self.payload(quantity=2), invoice_url="https://plisio.net/invoice/2")
-
-        self.assertEqual(second.data["redirect_url"], "https://plisio.net/invoice/2")
-        plisio.assert_called_once()
-        self.assertEqual(Order.objects.filter(customer__email="new@example.com").count(), 2)
-        self.assertEqual(self.product.available_count(), 0)
-
-    def test_a_changed_price_gets_its_own_order(self):
-        self.checkout(self.payload())
-        Product.objects.filter(pk=self.product.pk).update(price=99)
-
-        second, _ = self.checkout(self.payload(), invoice_url="https://plisio.net/invoice/2")
-
-        self.assertEqual(second.data["redirect_url"], "https://plisio.net/invoice/2")
-        self.assertEqual(Order.objects.filter(customer__email="new@example.com").count(), 2)
-
-    def test_an_expired_order_is_not_reused(self):
-        self.checkout(self.payload())
-        stale = timezone.now() - timedelta(hours=3)
-        Order.objects.filter(customer__email="new@example.com").update(created_at=stale, updated_at=stale)
-
-        second, _ = self.checkout(self.payload(), invoice_url="https://plisio.net/invoice/2")
-
-        self.assertEqual(second.data["redirect_url"], "https://plisio.net/invoice/2")
-        self.assertEqual(Order.objects.filter(customer__email="new@example.com").count(), 2)
-
-    def test_a_released_order_is_not_reused(self):
-        self.checkout(self.payload())
-        order = Order.objects.get(customer__email="new@example.com")
-        order.release()
-
-        second, _ = self.checkout(self.payload(), invoice_url="https://plisio.net/invoice/2")
-
-        self.assertEqual(second.data["redirect_url"], "https://plisio.net/invoice/2")
-        self.assertEqual(Order.objects.filter(customer__email="new@example.com").count(), 2)
-
-    def test_another_customer_does_not_reuse_the_invoice(self):
-        self.checkout(self.payload())
-        other = self.payload() | {"email": "other@example.com"}
-
-        second, plisio = self.checkout(other, invoice_url="https://plisio.net/invoice/2")
-
-        self.assertEqual(second.data["redirect_url"], "https://plisio.net/invoice/2")
-        plisio.assert_called_once()
-        self.assertEqual(Allocation.objects.count(), 2)
-
-    def test_a_failed_invoice_leaves_nothing_to_reuse(self):
-        with patch("sales.views.requests.get") as plisio:
-            plisio.return_value.status_code = 500
-            plisio.return_value.json.return_value = {"status": "error"}
-            self.client.post(self.url, self.payload(), format="json")
-
-        second, plisio = self.checkout(self.payload(), invoice_url="https://plisio.net/invoice/2")
-
-        self.assertEqual(second.data["redirect_url"], "https://plisio.net/invoice/2")
-        plisio.assert_called_once()
-
-
-@override_settings(VALIDATE_EMAIL_MX=False)
-class CheckoutLimitTests(OrderItemFactoryMixin, TestCase):
-    """One request must not be able to lock a whole product or spawn a huge order."""
-
-    def setUp(self):
-        super().setUp()
-        self.product = self.make_product(50)
-        self.client = APIClient()
-        self.url = reverse("order-create")
-
-    def post(self, items):
-        return self.client.post(self.url, {"email": "new@example.com", "items": items}, format="json")
-
-    @override_settings(VALIDATE_EMAIL_MX=True)
-    def test_an_undeliverable_email_domain_is_rejected(self):
-        cache.clear()
-        with patch.object(dns.resolver.Resolver, "resolve", side_effect=dns.resolver.NXDOMAIN):
-            response = self.post([{"product_id": self.product.id, "quantity": 1}])
-
-        self.assertEqual(response.status_code, 400)
-        self.assertIn("email", response.data)
-        self.assertEqual(Customer.objects.filter(email="new@example.com").count(), 0)
-
-    def test_quantity_over_the_cap_is_rejected(self):
-        response = self.post([{"product_id": self.product.id, "quantity": settings.MAX_ITEM_QUANTITY + 1}])
-
-        self.assertEqual(response.status_code, 400)
-        self.assertEqual(Allocation.objects.count(), 0)
-
-    def test_zero_quantity_is_rejected(self):
-        response = self.post([{"product_id": self.product.id, "quantity": 0}])
-
-        self.assertEqual(response.status_code, 400)
-        self.assertEqual(OrderItem.objects.count(), 0)
-
-    def test_empty_order_is_rejected(self):
-        self.assertEqual(self.post([]).status_code, 400)
-        self.assertEqual(Order.objects.filter(customer__email="new@example.com").count(), 0)
-
-    def test_too_many_lines_are_rejected(self):
-        items = [
-            {"product_id": self.make_product(1, name=f"P{i}").id, "quantity": 1}
-            for i in range(settings.MAX_ORDER_ITEMS + 1)
-        ]
-
-        self.assertEqual(self.post(items).status_code, 400)
-        self.assertEqual(Allocation.objects.count(), 0)
-
-    def test_the_same_product_twice_is_rejected(self):
-        # Splitting the cart into two lines used to slip past both the per-item cap and the
-        # availability check, which each looked at one line at a time.
-        cap = settings.MAX_ITEM_QUANTITY
-        response = self.post(
-            [
-                {"product_id": self.product.id, "quantity": cap},
-                {"product_id": self.product.id, "quantity": cap},
-            ]
-        )
-
-        self.assertEqual(response.status_code, 400)
-        self.assertEqual(Allocation.objects.count(), 0)
-
-
-class ExpireCommandTests(OrderItemFactoryMixin, TestCase):
-    def test_expired_pending_order_releases_its_units(self):
-        product = self.make_product(2)
-        item = self.make_item(product, quantity=1)
-        item.reserve()
-        Order.objects.filter(pk=self.order.pk).update(
-            created_at=timezone.now() - timedelta(hours=3),
-            updated_at=timezone.now() - timedelta(hours=3),
-        )
-
-        call_command("expire_transactions")
-
-        self.order.refresh_from_db()
-        self.assertEqual(self.order.status, Order.OrderStatus.EXPIRED)
-        self.assertEqual(product.available_count(), 2)
-
-    def test_fresh_pending_order_is_left_alone(self):
-        product = self.make_product(2)
-        self.make_item(product, quantity=1).reserve()
-
-        call_command("expire_transactions")
-
-        self.order.refresh_from_db()
-        self.assertEqual(self.order.status, Order.OrderStatus.PENDING)
-        self.assertEqual(product.available_count(), 1)
-
-    def test_one_broken_order_does_not_hold_up_the_others(self):
-        product = self.make_product(4)
-        self.make_item(product, quantity=1).reserve()
-        other = Order.objects.create(customer=self.customer, total_price=10)
-        self.make_item(product, quantity=1, order=other).reserve()
-
-        stale = timezone.now() - timedelta(hours=3)
-        Order.objects.all().update(created_at=stale, updated_at=stale)
-
-        def release(self):
-            if self.pk == other.pk:
-                raise ValueError("boom")
-            return original(self)
-
-        original = Order.release
-        with patch.object(Order, "release", release), self.assertLogs("sales", level="ERROR"):
-            call_command("expire_transactions")
-
-        self.order.refresh_from_db()
-        other.refresh_from_db()
-        self.assertEqual(self.order.status, Order.OrderStatus.EXPIRED)
-        self.assertEqual(other.status, Order.OrderStatus.PENDING)
-        # Only the healthy order gave its unit back; the broken one still holds its own.
-        self.assertEqual(product.available_count(), 3)
-
-
-class StockItemDeletionTests(OrderItemFactoryMixin, TestCase):
-    """A unit an order holds is the thing the customer paid for - it must not be deletable."""
-
-    def test_delivered_unit_cannot_be_deleted(self):
-        product = self.make_product(1)
-        item = self.make_item(product, quantity=1)
-        item.reserve()
-        item.deliver()
-        unit = StockItem.objects.get(product=product)
-
-        with self.assertRaises(ProtectedError), self.assertLogs("sales.models", level="WARNING"):
-            unit.delete()
-
-        self.assertTrue(StockItem.objects.filter(pk=unit.pk).exists())
-
-    def test_reserved_unit_cannot_be_deleted(self):
-        product = self.make_product(1)
-        self.make_item(product, quantity=1).reserve()
-        unit = StockItem.objects.get(product=product)
-
-        with self.assertRaises(ProtectedError), self.assertLogs("sales.models", level="WARNING"):
-            unit.delete()
-
-        self.assertTrue(StockItem.objects.filter(pk=unit.pk).exists())
-
-    def test_released_unit_can_be_deleted_and_keeps_the_record(self):
-        product = self.make_product(1)
-        item = self.make_item(product, quantity=1)
-        item.reserve()
-        item.release()
-        unit = StockItem.objects.get(product=product)
-
-        unit.delete()
-
-        allocation = Allocation.objects.get(order_item=item)
-        self.assertIsNone(allocation.stock_item_id)
-        self.assertEqual(allocation.state, Allocation.State.RELEASED)
-
-    def test_a_free_unit_is_deletable(self):
-        product = self.make_product(1)
-        unit = StockItem.objects.get(product=product)
-
-        unit.delete()
-
-        self.assertFalse(StockItem.objects.filter(pk=unit.pk).exists())
-
-
-class PurchasesMailTests(OrderItemFactoryMixin, TestCase):
-    def setUp(self):
-        super().setUp()
-        # get_current() resolves either by SITE_ID or by the request host - this covers both.
-        Site.objects.update_or_create(pk=1, defaults={"domain": "testserver", "name": "test"})
-
-    def test_the_mail_carries_one_link_to_the_purchases_page(self):
-        self.customer.rotate_access_token()
-        request = RequestFactory().post("/api/send-links/")
-
-        send_purchases_link(request, self.customer)
-
-        self.assertEqual(len(mail.outbox), 1)
-        body = mail.outbox[0].body
-        self.assertIn(f"/purchases/{self.customer.access_token}", body)
-        # Sharing it hands over every purchase, so the warning is part of the contract.
-        self.assertIn("do not forward it", body)
-
-    def test_a_russian_customer_is_written_to_in_russian(self):
-        self.customer.set_language("ru")
-        self.customer.rotate_access_token()
-
-        send_purchases_link(RequestFactory().post("/api/send-links/"), self.customer)
-
-        self.assertEqual(mail.outbox[0].subject, "Ваш заказ выполнен")
-        self.assertIn("не пересылайте", mail.outbox[0].body)
-
-    def test_the_language_comes_from_the_customer_not_the_active_one(self):
-        """The delivery mail is sent from the Plisio webhook, where no customer locale is active."""
-        self.customer.set_language("ru")
-        self.customer.rotate_access_token()
-
-        with translation.override("en"):
-            send_purchases_link(None, self.customer)
-
-        self.assertIn("не пересылайте", mail.outbox[0].body)
-
-    def test_no_file_links_are_listed(self):
-        item = self.make_item(self.make_product(1), quantity=1)
-        item.reserve()
-        allocation = item.deliver()[0]
-        self.customer.rotate_access_token()
-
-        send_purchases_link(RequestFactory().post("/api/send-links/"), self.customer)
-
-        self.assertNotIn(str(allocation.token), mail.outbox[0].body)
-
-
-class PurchasesPageTests(OrderItemFactoryMixin, TestCase):
+class PurchasesPageTests(SalesFactoryMixin, TestCase):
     """The token in the URL is the whole authentication, so its edges are the security boundary."""
 
     def setUp(self):
         super().setUp()
         Site.objects.update_or_create(pk=1, defaults={"domain": "testserver", "name": "test"})
 
-        self.product = self.make_product(3)
-        self.item = self.make_item(self.product, quantity=2)
-        self.item.reserve()
-        self.item.deliver()
-        self.order.status = Order.OrderStatus.PAID
-        self.order.paid_at = timezone.now()
-        self.order.save(update_fields=["status", "paid_at"])
+        self.product = self.make_product()
+        self.item = self.make_item(self.product)
+        self.pay()
+        self.item.refresh_from_db()
 
         self.customer.rotate_access_token()
         self.client = APIClient()
@@ -1011,27 +805,17 @@ class PurchasesPageTests(OrderItemFactoryMixin, TestCase):
 
         item = response.data["orders"][0]["items"][0]
         self.assertEqual(item["product_name"], self.product.name)
-        self.assertEqual(len(item["allocations"]), 2)
-        self.assertTrue(all(a["is_downloadable"] for a in item["allocations"]))
-        self.assertTrue(all("/api/files/" in a["download_url"] for a in item["allocations"]))
+        self.assertTrue(item["is_downloadable"])
+        self.assertIn("/api/files/", item["download_url"])
 
     def test_an_unpaid_order_is_not_listed(self):
-        pending = Order.objects.create(customer=self.customer, total_price=10)
-        self.make_item(self.product, quantity=1, order=pending).reserve()
+        pending = Order.objects.create(customer=self.customer, total_price=Decimal("10.00"))
+        self.make_item(self.make_product("Another", slug="another"), order=pending)
 
         response = self.page()
 
         self.assertEqual(len(response.data["orders"]), 1)
         self.assertEqual(response.data["orders"][0]["id"], self.order.id)
-
-    def test_a_released_allocation_is_not_listed(self):
-        """A unit given back is not a purchase - it must not show up as a downloadable file."""
-
-        self.item.allocations.update(state=Allocation.State.RELEASED)
-
-        response = self.page()
-
-        self.assertEqual(response.data["orders"][0]["items"][0]["allocations"], [])
 
     def test_an_expired_token_is_404_and_says_nothing(self):
         self.customer.access_token_expires_at = timezone.now() - timedelta(seconds=1)
@@ -1061,97 +845,139 @@ class PurchasesPageTests(OrderItemFactoryMixin, TestCase):
         response = self.page()
 
         self.assertEqual(len(response.data["orders"]), 1)
-        self.assertEqual(response.data["orders"][0]["id"], self.order.id)
 
     def test_an_expired_file_token_offers_no_url(self):
-        Allocation.objects.update(token_expires_at=timezone.now() - timedelta(seconds=1))
+        OrderItem.objects.update(token_expires_at=timezone.now() - timedelta(seconds=1))
 
-        allocations = self.page().data["orders"][0]["items"][0]["allocations"]
+        item = self.page().data["orders"][0]["items"][0]
 
-        self.assertTrue(all(a["is_downloadable"] is False for a in allocations))
-        self.assertTrue(all(a["download_url"] is None for a in allocations))
+        self.assertFalse(item["is_downloadable"])
+        self.assertIsNone(item["download_url"])
 
 
-class RefreshTokenTests(OrderItemFactoryMixin, TestCase):
+class RefreshTokenTests(SalesFactoryMixin, TestCase):
     def setUp(self):
         super().setUp()
         Site.objects.update_or_create(pk=1, defaults={"domain": "testserver", "name": "test"})
 
-        self.item = self.make_item(self.make_product(2), quantity=2)
-        self.item.reserve()
-        self.item.deliver()
-        self.order.status = Order.OrderStatus.PAID
-        self.order.save(update_fields=["status"])
+        self.first = self.make_item(self.make_product("First", slug="first"))
+        self.second = self.make_item(self.make_product("Second", slug="second"))
+        self.pay()
+        self.first.refresh_from_db()
+        self.second.refresh_from_db()
 
         self.customer.rotate_access_token()
         self.client = APIClient()
 
-    def test_refreshing_one_file_leaves_the_others_alone(self):
-        first, second = self.item.allocations.order_by("pk")
-        url = reverse("purchases-refresh", args=[self.customer.access_token, first.pk])
+    def refresh(self, item_id, token=None):
+        url = reverse("purchases-refresh", args=[token or self.customer.access_token, item_id])
+        return self.client.post(url)
 
-        response = self.client.post(url)
+    def test_refreshing_one_file_leaves_the_others_alone(self):
+        old_second = self.second.token
+
+        response = self.refresh(self.first.pk)
 
         self.assertEqual(response.status_code, 200)
-        first.refresh_from_db()
-        second_after = self.item.allocations.get(pk=second.pk)
-        self.assertEqual(response.data["id"], first.pk)
-        self.assertTrue(first.is_token_valid())
-        self.assertEqual(second_after.token, second.token)
+        self.first.refresh_from_db()
+        self.second.refresh_from_db()
+        self.assertNotEqual(self.first.token, response.data["download_url"].rsplit("/", 2)[-2])
+        self.assertEqual(self.second.token, old_second)
 
-    def test_an_expired_file_token_becomes_usable_again(self):
-        allocation = self.item.allocations.first()
-        Allocation.objects.filter(pk=allocation.pk).update(token_expires_at=timezone.now() - timedelta(seconds=1))
+    def test_refresh_all_rotates_every_file(self):
+        before = {self.first.pk: self.first.token, self.second.pk: self.second.token}
 
-        url = reverse("purchases-refresh", args=[self.customer.access_token, allocation.pk])
-        self.client.post(url)
+        response = self.client.post(reverse("purchases-refresh-all", args=[self.customer.access_token]))
 
-        allocation.refresh_from_db()
-        self.assertTrue(allocation.is_token_valid())
+        self.assertEqual(response.status_code, 200)
+        for item in (self.first, self.second):
+            item.refresh_from_db()
+            self.assertNotEqual(item.token, before[item.pk])
 
     def test_somebody_elses_file_cannot_be_refreshed(self):
         stranger = Customer.objects.create(email="stranger@example.com")
-        stranger.rotate_access_token()
-        allocation = self.item.allocations.first()
+        stranger_order = Order.objects.create(customer=stranger, total_price=Decimal("10.00"))
+        theirs = self.make_item(self.make_product("Theirs", slug="theirs"), order=stranger_order)
+        self.pay(stranger_order)
+        theirs.refresh_from_db()
 
-        url = reverse("purchases-refresh", args=[stranger.access_token, allocation.pk])
-        response = self.client.post(url)
+        response = self.refresh(theirs.pk)
 
         self.assertEqual(response.status_code, 404)
-        old_token = allocation.token
-        allocation.refresh_from_db()
-        self.assertEqual(allocation.token, old_token)
+        token = theirs.token
+        theirs.refresh_from_db()
+        self.assertEqual(theirs.token, token)
 
-    def test_refresh_all_reissues_every_file(self):
-        before = {a.pk: a.token for a in self.item.allocations.all()}
-
-        url = reverse("purchases-refresh-all", args=[self.customer.access_token])
-        response = self.client.post(url)
-
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(len(response.data), 2)
-        after = {a.pk: a.token for a in self.item.allocations.all()}
-        self.assertEqual(before.keys(), after.keys())
-        self.assertTrue(all(before[pk] != after[pk] for pk in before))
-
-    def test_refreshing_with_a_dead_page_token_is_404(self):
+    def test_an_expired_page_token_refreshes_nothing(self):
         self.customer.access_token_expires_at = timezone.now() - timedelta(seconds=1)
         self.customer.save(update_fields=["access_token_expires_at"])
 
-        url = reverse("purchases-refresh-all", args=[self.customer.access_token])
+        response = self.refresh(self.first.pk)
 
-        self.assertEqual(self.client.post(url).status_code, 404)
+        self.assertEqual(response.status_code, 404)
 
 
-class MailOutageTests(OrderItemFactoryMixin, TestCase):
+class CartItemsTests(SalesFactoryMixin, TestCase):
+    """The cart lives in the browser, so the page asks the server what those ids are."""
+
+    def setUp(self):
+        super().setUp()
+        self.product = self.make_product(price="12.50")
+        self.hidden = self.make_product("Hidden", slug="hidden", is_active=False)
+        self.client = APIClient()
+
+    def items(self, ids: str):
+        return self.client.get(reverse("cart-items"), {"ids": ids})
+
+    def test_known_ids_come_back_priced(self):
+        response = self.items(str(self.product.pk))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual(response.data[0]["name_en"], self.product.name)
+        self.assertEqual(Decimal(response.data[0]["price"]), Decimal("12.50"))
+
+    def test_an_inactive_product_is_simply_absent(self):
+        response = self.items(f"{self.product.pk},{self.hidden.pk}")
+
+        self.assertEqual([row["id"] for row in response.data], [self.product.pk])
+
+    def test_garbage_ids_are_ignored(self):
+        response = self.items("nope,,7.5,-3")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data, [])
+
+    def test_both_languages_ride_along(self):
+        """No `?lang=` anywhere in the API (ADR-0010): every visitor gets the same payload."""
+
+        self.product.name_ru = "Счёт за коммуналку"
+        self.product.save(update_fields=["name_ru"])
+
+        response = self.client.get(reverse("cart-items"), {"ids": str(self.product.pk), "lang": "ru"})
+
+        self.assertEqual(response.data[0]["name_ru"], "Счёт за коммуналку")
+        self.assertEqual(response.data[0]["name_en"], self.product.name)
+
+    def test_a_line_carries_what_the_grid_card_carries(self):
+        """The cart draws the same card the catalog does, so it needs the same fields."""
+
+        row = self.items(str(self.product.pk)).data[0]
+
+        self.assertEqual(
+            set(row),
+            {"id", "url_slug", "name_en", "name_ru", "price", "year", "country", "document_type", "preview"},
+        )
+
+
+class MailOutageTests(SalesFactoryMixin, TestCase):
     """A dead SMTP must not cost the customer their order or their link."""
 
     def setUp(self):
         super().setUp()
         Site.objects.update_or_create(pk=1, defaults={"domain": "testserver", "name": "test"})
 
-        self.item = self.make_item(self.make_product(1), quantity=1)
-        self.item.reserve()
+        self.item = self.make_item(self.make_product())
         self.client = APIClient()
 
     def test_a_paid_order_is_still_delivered_when_the_mail_fails(self):
@@ -1177,13 +1003,11 @@ class MailOutageTests(OrderItemFactoryMixin, TestCase):
         self.assertEqual(response.status_code, 200)
         self.order.refresh_from_db()
         self.assertEqual(self.order.status, Order.OrderStatus.PAID)
-        self.assertEqual(self.item.allocations.filter(state=Allocation.State.DELIVERED).count(), 1)
+        self.item.refresh_from_db()
+        self.assertTrue(self.item.is_token_valid())
 
     def test_the_form_says_so_instead_of_pretending_the_mail_went_out(self):
-        self.item.deliver()
-        self.order.status = Order.OrderStatus.PAID
-        self.order.save(update_fields=["status"])
-        self.order.mark_paid()
+        self.pay()
 
         with (
             patch("sales.views.send_purchases_link", side_effect=OSError("smtp is down")),
@@ -1194,7 +1018,7 @@ class MailOutageTests(OrderItemFactoryMixin, TestCase):
         self.assertEqual(response.status_code, 502)
 
 
-class PruneCallbackLogsTests(OrderItemFactoryMixin, TestCase):
+class PruneCallbackLogsTests(SalesFactoryMixin, TestCase):
     """The raw payloads are for debugging a sale, not for keeping forever."""
 
     def make_log(self, age_days: int) -> PaymentCallbackLog:

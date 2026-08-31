@@ -1,28 +1,84 @@
-import logging
+"""The catalog API behind the SPA.
 
-from djmoney.contrib.exchange.models import Rate
-from rest_framework import views, viewsets
-from rest_framework.response import Response
+Filtering mirrors the bot pages: the same querysets, the same "unknown slug is a 404, `all` and
+absence mean any" rule, the same page size - so a person and a bot walking the same URL see the
+same set.
+"""
 
-from catalog.models import Country, Product
-from catalog.serializers import CountrySerializer
+from django.shortcuts import get_object_or_404
+from rest_framework.generics import ListAPIView, RetrieveAPIView
+from rest_framework.pagination import PageNumberPagination
 
-logger = logging.getLogger(__name__)
+from catalog.models import Country, DocumentType, Product
+from catalog.serializers import (
+    CountrySerializer,
+    DocumentTypeSerializer,
+    ProductDetailSerializer,
+    ProductListSerializer,
+)
+
+# Cards per page, shared with the server-rendered listing (storefront.views).
+PAGE_SIZE = 100
 
 
-class CountryViewSet(viewsets.ReadOnlyModelViewSet):
-    """Send all countries with nested products"""
+class CatalogPagination(PageNumberPagination):
+    page_size = PAGE_SIZE
+
+    def get_paginated_response(self, data):
+        """Adds `total_pages`, so the SPA never has to keep a copy of the page size to divide by."""
+        response = super().get_paginated_response(data)
+        response.data["total_pages"] = self.page.paginator.num_pages
+        return response
+
+
+class CountryListView(ListAPIView):
+    """Sidebar data: countries that have products, with counts. `is_popular` marks the top block."""
 
     serializer_class = CountrySerializer
 
     def get_queryset(self):
-        in_stock = Product.objects.with_available().filter(available__gt=0).values("pk")
-        return Country.objects.filter(products__pk__in=in_stock).distinct()
+        return Country.objects.non_empty()
 
 
-class ExchangeRatesView(views.APIView):
-    """Send exchange rates"""
+class DocumentTypeListView(ListAPIView):
+    """Filter chips: document types that have products, with counts."""
 
-    def get(self, request):
-        rates = {rate.currency: rate.value for rate in Rate.objects.all()}
-        return Response(rates)
+    serializer_class = DocumentTypeSerializer
+
+    def get_queryset(self):
+        return DocumentType.objects.with_product_counts().filter(products_count__gt=0)
+
+
+class ProductListView(ListAPIView):
+    """The grid.
+
+    `?country=` and `?type=` take slugs; `all` or absence means any; `?page=` pages; `?q=` is the
+    product search. The search is the server's job rather than the SPA's: filtering only the pages
+    already loaded would count the pagination against the whole catalog and offer a "load more"
+    that adds nothing.
+    """
+
+    serializer_class = ProductListSerializer
+    pagination_class = CatalogPagination
+
+    def get_queryset(self):
+        products = Product.objects.active().for_listing()
+
+        country = self.request.query_params.get("country")
+        if country and country != "all":
+            products = products.filter(country=get_object_or_404(Country, slug=country))
+
+        doctype = self.request.query_params.get("type")
+        if doctype and doctype != "all":
+            products = products.filter(document_type=get_object_or_404(DocumentType, slug=doctype))
+
+        return products.search(self.request.query_params.get("q"))
+
+
+class ProductDetailView(RetrieveAPIView):
+    """One product by id - the SPA takes the id off the `<id>-<slug>` URL segment."""
+
+    serializer_class = ProductDetailSerializer
+
+    def get_queryset(self):
+        return Product.objects.active().for_listing()

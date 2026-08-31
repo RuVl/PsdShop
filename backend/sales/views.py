@@ -8,18 +8,21 @@ from django import views
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import transaction
-from django.db.models import Prefetch
 from django.http import FileResponse, HttpResponseNotFound
+from django.urls import reverse
 from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from backend.sites import absolute_url
+from catalog.models import Product
+from catalog.serializers import ProductListSerializer
 from customer.models import Customer
-from sales.models import Allocation, Order, PaymentCallbackLog, Transaction
+from sales.models import Order, OrderItem, PaymentCallbackLog, Transaction
 from sales.plisio import apply_order_status, callback_to_fields
 from sales.serializers import (
-    AllocationSerializer,
     OrderSerializer,
+    PurchaseItemSerializer,
     PurchaseOrderSerializer,
     SendDownloadLinksSerializer,
 )
@@ -32,6 +35,18 @@ PLISIO_LANGUAGES = {
     "en": "en_US",
     "ru": "ru_RU",
 }
+
+
+def callback_url(request) -> str:
+    """Where Plisio reports this invoice, with the parameter that decides how it signs the report."""
+
+    return absolute_url(reverse("plisio-callback"), request) + "?json=true"
+
+
+def redact(value) -> str:
+    """Message with the Plisio API key blanked out - it rides in the request URL requests echoes."""
+
+    return str(value).replace(settings.PLISIO_SECRET_KEY, "***")
 
 
 class OrderCreateView(APIView):
@@ -49,7 +64,7 @@ class OrderCreateView(APIView):
 
         if serializer.reused_order is not None:
             # Same customer, same cart, invoice still alive: send them back to it instead of
-            # reserving a second copy of the same units.
+            # minting a second invoice for the same purchase.
             logger.info(f"Order {order.id} reused for a repeated checkout")
             return Response({"redirect_url": order.invoice_url}, status=status.HTTP_201_CREATED)
 
@@ -57,12 +72,16 @@ class OrderCreateView(APIView):
         invoice_data = {
             "order_name": f"Order {order.id}",
             "order_number": order.id,
-            "source_currency": order.total_price.currency,
-            "source_amount": order.total_price.amount,
+            "source_currency": "USD",
+            "source_amount": order.total_price,
             "email": order.customer.email,
             "api_key": settings.PLISIO_SECRET_KEY,
             "language": PLISIO_LANGUAGES.get(order.customer.language, "en_US"),
             "expire_min": "60",
+            # `?json=true` is what makes Plisio post JSON and sign it the way validate_hash checks;
+            # without it the callback arrives form-encoded, signed with PHP's serialize(), and no
+            # payment would ever be accepted. Sent per invoice so it cannot be lost in a dashboard.
+            "callback_url": callback_url(request),
         }
 
         response, payload = None, {}
@@ -71,9 +90,10 @@ class OrderCreateView(APIView):
             payload = response.json()
         except ValueError as e:
             # Includes requests' JSONDecodeError - the call went through, the body is not JSON.
-            logger.error(f"Plisio answered order {order.id} with something that is not JSON: {e}")
+            logger.error(f"Plisio answered order {order.id} with something that is not JSON: {redact(e)}")
         except requests.RequestException as e:
-            logger.error(f"Plisio is unreachable for order {order.id}: {e}")
+            # requests puts the request URL in the message, and the API key travels in it.
+            logger.error(f"Plisio is unreachable for order {order.id}: {redact(e)}")
 
         if response is not None and response.status_code == 200 and payload.get("status") == "success":
             logger.info(f"Order {order.id} created successfully")
@@ -91,7 +111,7 @@ class OrderCreateView(APIView):
         http_status = response.status_code if response is not None else None
         logger.error(f"Invoice not created for order {order.id}: HTTP {http_status}, payload {payload}")
 
-        # Deleting the order takes its allocations with it, so the units are free again.
+        # Nothing was handed over and no invoice exists, so the order is just noise - drop it.
         order.delete()
 
         return Response(
@@ -109,17 +129,41 @@ class PlisioCallbackView(APIView):
 
     @staticmethod
     def validate_hash(data):
-        received_hash = data.pop("verify_hash", None)
+        """
+        HMAC-SHA1 over the JSON body, the way Plisio signs it.
 
-        ordered_data = json.dumps(data, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
-        calculated_hash = hmac.new(
-            settings.PLISIO_SECRET_KEY.encode("utf-8"), ordered_data.encode("utf-8"), hashlib.sha1
-        ).hexdigest()
+        This only ever matches when the callback URL carries `?json=true` - without it Plisio
+        posts a form and signs PHP's `serialize()` of the sorted array, which is a different
+        algorithm entirely. The URL is sent with every invoice (see OrderCreateView), so that
+        parameter is not left to a dashboard setting.
 
-        return calculated_hash == received_hash
+        Plisio's own SDK hashes the body in the order it arrived, non-ASCII escaped. Whether the
+        keys come sorted is not something we get to know, so both readings are accepted: each is
+        an HMAC with our own key, so accepting the second one forges nothing.
+        """
+
+        received_hash = data.pop("verify_hash", None) or ""
+
+        for candidate in (
+            json.dumps(data, separators=(",", ":")),
+            json.dumps(data, sort_keys=True, separators=(",", ":")),
+        ):
+            calculated = hmac.new(
+                settings.PLISIO_SECRET_KEY.encode("utf-8"), candidate.encode("utf-8"), hashlib.sha1
+            ).hexdigest()
+            # Constant-time: a plain == leaks how many leading bytes matched, and the value being
+            # compared is supplied by whoever posted the callback.
+            if hmac.compare_digest(calculated, received_hash):
+                return True
+
+        return False
 
     def post(self, request, *args, **kwargs):
-        data = request.data.copy()
+        # Plisio posts form-encoded, so request.data is a QueryDict: `copy()` keeps it one, and a
+        # QueryDict hands back *lists* from pop() and from dict(). That is why this is flattened
+        # first - the hash compare, the stored payload and callback_to_fields all want plain
+        # strings, and a JSON post (what the tests do) already arrives as a plain dict.
+        data = request.data.dict() if hasattr(request.data, "dict") else dict(request.data)
         if not self.validate_hash(data):
             logger.warning(f"Hash verification failed for transaction {data.get('txn_id')}")
             return Response(
@@ -137,21 +181,12 @@ class PlisioCallbackView(APIView):
             logger.warning(f"Callback for unknown order {data.get('order_number')}")
             return Response({"detail": "Order not found"}, status=status.HTTP_404_NOT_FOUND)
 
-        allocations = []
-        first_payment = False
-
-        try:
-            with transaction.atomic():
-                self.upsert_transaction(order, data)
-                first_payment, allocations = apply_order_status(order, data.get("status"))
-        except ValueError as e:
-            # Only one thing raises here now: the order is paid but stock ran out while the payment
-            # was pending. Everything rolls back, so Plisio can retry once stock is refilled.
-            logger.warning(f"Callback for order {order.id} could not be applied: {e}")
-            return Response({"detail": "Order processing conflict"}, status=status.HTTP_409_CONFLICT)
+        with transaction.atomic():
+            self.upsert_transaction(order, data)
+            first_payment, items = apply_order_status(order, data.get("status"))
 
         # A duplicate callback delivers nothing new and must not send a second email.
-        if first_payment and allocations:
+        if first_payment and items:
             customer = order.customer
             # Deliberately not a rotation: a second purchase must not revoke the link the customer
             # got with the first one and may still have open.
@@ -160,9 +195,9 @@ class PlisioCallbackView(APIView):
             try:
                 send_purchases_link(request, customer)
             except Exception as e:
-                # The sale itself went through and the files are allocated - failing the callback
-                # here would only make Plisio retry, and the retry sends nothing because paid_at is
-                # already stamped. The customer gets their link from the form on the site.
+                # The sale itself went through and the files are handed over - failing the
+                # callback here would only make Plisio retry, and the retry sends nothing because
+                # paid_at is already stamped. The customer gets their link from the form on the site.
                 logger.error(f"Order {order.id} is delivered but the e-mail did not go out: {e}")
 
         return Response(
@@ -193,22 +228,22 @@ class PlisioCallbackView(APIView):
         return txn
 
 
-def serve_allocation(allocation: Allocation, count: bool = True):
-    """Stream the file behind an allocation, or 404 - never say which of the checks failed."""
+def serve_order_item(item: OrderItem, count: bool = True):
+    """Stream the file behind one bought line, or 404 - never say which of the checks failed."""
 
-    if not allocation.is_token_valid():
+    if not item.is_token_valid():
         return HttpResponseNotFound("Expired download link")
 
-    if allocation.stock_item is None:
-        logger.error(f"Allocation {allocation.id} has no file to serve")
+    if not item.product.file:
+        logger.error(f"Order item {item.id} points at a product without a file")
         return HttpResponseNotFound()
 
     # noqa SIM115: FileResponse owns the handle and closes it when the stream ends - a `with` here
     # would close the file before a single byte went out.
-    response = FileResponse(open(allocation.stock_item.file.path, "rb"), as_attachment=True)  # noqa: SIM115
+    response = FileResponse(open(item.product.file.path, "rb"), as_attachment=True)  # noqa: SIM115
     if count:
         # Counted only once the file is actually open, so a 404 above never looks like a download.
-        allocation.record_download()
+        item.record_download()
     return response
 
 
@@ -221,8 +256,8 @@ class DownloadFileView(views.View):
             return HttpResponseNotFound()
 
         try:
-            allocation = Allocation.objects.select_related("stock_item").downloadable().get(token=token)
-        except (Allocation.DoesNotExist, ValidationError, ValueError):
+            item = OrderItem.objects.select_related("product").downloadable().get(token=token)
+        except (OrderItem.DoesNotExist, ValidationError, ValueError):
             return HttpResponseNotFound()
 
         # "Did the customer take the file" is what the counter answers, so the owner checking a file
@@ -230,9 +265,9 @@ class DownloadFileView(views.View):
         # member who opens a real customer link while logged into the admin is not counted either.
         staff = request.user.is_authenticated and request.user.is_staff
         if staff:
-            logger.info(f"Staff download of allocation {allocation.id}, not counted")
+            logger.info(f"Staff download of order item {item.id}, not counted")
 
-        return serve_allocation(allocation, count=not staff)
+        return serve_order_item(item, count=not staff)
 
 
 class SendDownloadLinksView(APIView):
@@ -302,20 +337,13 @@ class PurchasesView(APIView):
         if customer is None:
             return Response({"detail": PURCHASES_GONE}, status=status.HTTP_404_NOT_FOUND)
 
-        orders = (
-            customer.orders.paid()
-            .prefetch_related(
-                "items",
-                Prefetch("items__allocations", queryset=Allocation.objects.downloadable()),
-            )
-            .order_by("-paid_at", "-created_at")
-        )
+        orders = customer.orders.paid().prefetch_related("items").order_by("-paid_at", "-created_at")
 
         serializer = PurchaseOrderSerializer(orders, many=True, context={"request": request})
         return Response({"email": customer.email, "orders": serializer.data})
 
 
-class RefreshAllocationView(APIView):
+class RefreshOrderItemView(APIView):
     """New token for one file - what the "refresh link" button calls."""
 
     def post(self, request, *args, **kwargs):
@@ -324,16 +352,16 @@ class RefreshAllocationView(APIView):
             return Response({"detail": PURCHASES_GONE}, status=status.HTTP_404_NOT_FOUND)
 
         # Scoped to the customer, so a valid token cannot be used to refresh somebody else's file.
-        allocations = Allocation.objects.downloadable().of_customer(customer).filter(pk=kwargs.get("allocation_id"))
-        refreshed = allocations.reissue_tokens()
+        items = OrderItem.objects.downloadable().of_customer(customer).filter(pk=kwargs.get("item_id"))
+        refreshed = items.reissue_tokens()
         if not refreshed:
             return Response({"detail": "No such file in your purchases"}, status=status.HTTP_404_NOT_FOUND)
 
-        serializer = AllocationSerializer(refreshed[0], context={"request": request})
+        serializer = PurchaseItemSerializer(refreshed[0], context={"request": request})
         return Response(serializer.data)
 
 
-class RefreshAllAllocationsView(APIView):
+class RefreshAllOrderItemsView(APIView):
     """New tokens for every file of this customer, in one go."""
 
     def post(self, request, *args, **kwargs):
@@ -341,6 +369,28 @@ class RefreshAllAllocationsView(APIView):
         if customer is None:
             return Response({"detail": PURCHASES_GONE}, status=status.HTTP_404_NOT_FOUND)
 
-        refreshed = Allocation.objects.downloadable().of_customer(customer).reissue_tokens()
-        serializer = AllocationSerializer(refreshed, many=True, context={"request": request})
+        refreshed = OrderItem.objects.downloadable().of_customer(customer).reissue_tokens()
+        serializer = PurchaseItemSerializer(refreshed, many=True, context={"request": request})
         return Response(serializer.data)
+
+
+class CartItemsView(APIView):
+    """
+    Products by id, for the cart that lives in the browser.
+
+    The cart is localStorage (ADR-0010), so the server cannot render it from state it does not
+    have - the page asks for the lines it holds. Unknown or deactivated ids are simply absent from
+    the answer, which is how the cart drops what is no longer on sale, and a price that moved
+    since the line was added arrives corrected.
+
+    Deliberately the catalog's own card payload: a line added from the grid and a line refreshed
+    here are then the same object, and both languages ride along like everywhere else in the API.
+    """
+
+    def get(self, request, *args, **kwargs):
+        raw = request.query_params.get("ids", "")
+        ids = [int(chunk) for chunk in raw.split(",") if chunk.strip().isdigit()][: settings.MAX_ORDER_ITEMS]
+
+        products = Product.objects.active().for_listing().filter(pk__in=ids)
+
+        return Response(ProductListSerializer(products, many=True, context={"request": request}).data)

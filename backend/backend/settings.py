@@ -42,12 +42,14 @@ INSTALLED_APPS = [
     "django.contrib.messages",
     "django.contrib.staticfiles",
     "django.contrib.sites",
+    # Ships the sitemap.xml template the storefront map is rendered with.
+    "django.contrib.sitemaps",
     "rest_framework",
     "corsheaders",
-    "djmoney",
-    "djmoney.contrib.exchange",
     "tinymce",
+    "storefront",
     "catalog",
+    "content",
     "customer",
     "mailing",
     "sales",
@@ -57,6 +59,9 @@ MIDDLEWARE = [
     "corsheaders.middleware.CorsMiddleware",
     "django.middleware.security.SecurityMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
+    # Picks the language off the URL prefix (/en/, /ru/) and falls back to Accept-Language. The
+    # storefront is server-rendered, so the page language has to be active during the response.
+    "django.middleware.locale.LocaleMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
@@ -75,8 +80,10 @@ TEMPLATES = [
             "context_processors": [
                 "django.template.context_processors.debug",
                 "django.template.context_processors.request",
+                "django.template.context_processors.i18n",
                 "django.contrib.auth.context_processors.auth",
                 "django.contrib.messages.context_processors.messages",
+                "storefront.context_processors.site_settings",
             ],
         },
     },
@@ -91,16 +98,27 @@ SITE_SCHEME = env("SITE_SCHEME", default="https")
 
 # Customer access lifetimes
 PURCHASES_PAGE_TTL = timedelta(hours=24)  # Customer.access_token
-DOWNLOAD_TTL = timedelta(hours=24)  # Allocation.token
+DOWNLOAD_TTL = timedelta(hours=24)  # OrderItem.token
 
-# Checkout limits. Every unpaid order holds its units until it expires, so one request must not be
-# able to lock a whole product.
-MAX_ITEM_QUANTITY = 30
+# Checkout limit. Nothing is reserved (ADR-0001), but every checkout costs a Plisio invoice, so a
+# single request must not be able to ask for the whole catalogue.
 MAX_ORDER_ITEMS = 25
 
 # Look up the MX record of the e-mail domain at checkout. Fails open on any DNS trouble, see
 # customer/validators.py - turn it off only if outbound DNS is blocked.
 VALIDATE_EMAIL_MX = env.bool("VALIDATE_EMAIL_MX", default=True)
+
+# The API answers a storefront, not a person: JSON only. DRF's browsable renderer is a writable
+# HTML form on every endpoint, so it stays a development convenience.
+REST_FRAMEWORK = {
+    "DEFAULT_RENDERER_CLASSES": ["rest_framework.renderers.JSONRenderer"],
+}
+
+if DEBUG:
+    REST_FRAMEWORK["DEFAULT_RENDERER_CLASSES"] = [
+        "rest_framework.renderers.JSONRenderer",
+        "rest_framework.renderers.BrowsableAPIRenderer",
+    ]
 
 LOGGING = {
     "version": 1,
@@ -171,11 +189,6 @@ AUTH_PASSWORD_VALIDATORS = [
     },
 ]
 
-# Custom serializers
-SERIALIZATION_MODULES = {
-    "json": "djmoney.serializers",
-}
-
 # Internationalization
 USE_I18N = True
 LANGUAGE_CODE = "en"
@@ -197,11 +210,25 @@ TIME_ZONE = "UTC"
 STATIC_URL = "static/"
 STATIC_ROOT = BASE_DIR / "static"
 
-# Currency settings
-CURRENCIES = ("USD", "RUB")
-BASE_CURRENCY = "USD"
-EXCHANGE_BACKEND = "djmoney.contrib.exchange.backends.OpenExchangeRatesBackend"
-OPEN_EXCHANGE_RATES_APP_ID = env("OPENEXCHANGERATES_APP_ID")
+# Plain static storage: the SPA assets are hashed by vite itself, and the remaining Django-served
+# static (bot-page CSS, admin) needs no cache-busting manifest.
+STORAGES = {
+    "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
+    "staticfiles": {"BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"},
+}
+
+# Uploads live on the `products` volume, split by who is allowed to read them.
+#
+# `media/` is public: product previews and slide images, served by nginx straight off the volume
+# (`location /media/` in frontend/nginx/site-body.conf) and by Django itself under DEBUG.
+#
+# `private/` holds the paid files and is deliberately outside MEDIA_ROOT, so no URL maps onto it -
+# a product file is only ever reached through DownloadFileView, behind a token. The storage below
+# has no `base_url` either, so `product.file.url` raises instead of quietly handing out a path
+# (see catalog/storages.py).
+MEDIA_URL = "/media/"
+MEDIA_ROOT = BASE_DIR / "products" / "media"
+PRODUCT_FILES_ROOT = BASE_DIR / "products" / "private"
 
 # Plisio token
 PLISIO_SECRET_KEY = env("PLISIO_SECRET_KEY")

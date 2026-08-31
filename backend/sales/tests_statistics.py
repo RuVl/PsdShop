@@ -9,21 +9,23 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 from django.contrib.auth.models import User
+from django.core.files.base import ContentFile
 from django.test import TestCase
 from django.urls import reverse
 from django.utils import timezone
 
-from catalog.models import Country, Product, StockItem
+from catalog.models import Country, DocumentType, Product
 from customer.models import Customer
 from sales import statistics
-from sales.models import Allocation, Order, OrderItem, PaymentCallbackLog, Transaction
+from sales.models import Order, OrderItem, PaymentCallbackLog, Transaction
 from sales.statistics import Period
 
 
 class StatisticsFactoryMixin:
     def setUp(self):
-        self.country = Country.objects.create(name="Testland", code="tl")
-        self.product = Product.objects.create(name="Test passport", country=self.country, price=10)
+        self.country = Country.objects.create(name="Testland", slug="testland", code="tl")
+        self.document_type = DocumentType.objects.create(name="Utility bill", slug="utility-bill")
+        self.product = self.make_product("Test utility bill")
         self.customer = Customer.objects.create(email="buyer@example.com")
 
         # A fixed window, so nothing here depends on when the suite runs.
@@ -31,36 +33,50 @@ class StatisticsFactoryMixin:
         self.end = datetime(2026, 3, 31, tzinfo=UTC)
         self.period = Period(start=self.start, end=self.end)
 
-    def make_stock(self, count: int, product: Product | None = None):
-        product = product or self.product
-        for i in range(count):
-            StockItem.objects.create(file=f"products/{product.pk}-{i}-{StockItem.objects.count()}.pdf", product=product)
+    def make_product(self, name: str, price: str = "10") -> Product:
+        return Product.objects.create(
+            name=name,
+            slug=name.lower().replace(" ", "-"),
+            country=self.country,
+            document_type=self.document_type,
+            year=2022,
+            price=Decimal(price),
+            file=ContentFile(b"template", name=f"{name}.psd"),
+        )
 
     def make_sale(
         self,
         paid_at,
         price="10",
-        quantity=1,
+        lines=1,
         customer=None,
         product=None,
         created_at=None,
     ) -> Order:
-        """A paid order with one item. auto_now_add ignores what we pass, so dates are set after."""
+        """
+        A paid order. auto_now_add ignores what we pass, so the dates are set afterwards.
 
-        order = Order.objects.create(customer=customer or self.customer, total_price=Decimal(price) * quantity)
+        `lines` is how many products the order holds - there is no quantity any more, a template
+        is bought once (ADR-0001), so several lines mean several distinct products.
+        """
+
+        order = Order.objects.create(customer=customer or self.customer, total_price=Decimal(price) * lines)
         Order.objects.filter(pk=order.pk).update(
             status=Order.OrderStatus.PAID,
             created_at=created_at or paid_at,
             paid_at=paid_at,
         )
-        OrderItem.objects.create(
-            order=order,
-            product=product or self.product,
-            product_name=(product or self.product).name,
-            unit_price=Decimal(price),
-            unit_price_usd=Decimal(price),
-            quantity=quantity,
-        )
+
+        first = product or self.product
+        for index in range(lines):
+            line_product = first if index == 0 else self.make_product(f"{first.name} extra {order.pk}-{index}", price)
+            OrderItem.objects.create(
+                order=order,
+                product=line_product,
+                product_name=first.name,
+                unit_price=Decimal(price),
+            )
+
         return Order.objects.get(pk=order.pk)
 
     def make_invoice(self, order, commission="0.001", rate="0.0005", status=Transaction.TransactionStatus.COMPLETED):
@@ -96,8 +112,6 @@ class PeriodBoundaryTests(StatisticsFactoryMixin, TestCase):
             product=self.product,
             product_name=self.product.name,
             unit_price=10,
-            unit_price_usd=10,
-            quantity=1,
         )
 
         totals = statistics.money_totals(self.period)
@@ -110,8 +124,8 @@ class PeriodBoundaryTests(StatisticsFactoryMixin, TestCase):
 
 
 class RevenueTests(StatisticsFactoryMixin, TestCase):
-    def test_gross_is_the_price_snapshot_times_quantity(self):
-        self.make_sale(self.start + timedelta(days=1), price="12.50", quantity=3)
+    def test_gross_is_the_sum_of_the_price_snapshots(self):
+        self.make_sale(self.start + timedelta(days=1), price="12.50", lines=3)
 
         self.assertEqual(statistics.money_totals(self.period).gross, Decimal("37.50"))
 
@@ -210,20 +224,20 @@ class CommissionTests(StatisticsFactoryMixin, TestCase):
 
 class TopListTests(StatisticsFactoryMixin, TestCase):
     def test_products_are_grouped_by_the_name_they_were_sold_under(self):
-        self.make_sale(self.start + timedelta(days=1), quantity=2)
+        self.make_sale(self.start + timedelta(days=1), lines=2)
         self.product.name = "Renamed afterwards"
         self.product.save(update_fields=["name"])
-        self.make_sale(self.start + timedelta(days=2), quantity=1)
+        self.make_sale(self.start + timedelta(days=2), lines=1)
 
         rows = statistics.top_products(self.period)
 
         self.assertEqual(
             {row["product_name"]: row["units"] for row in rows},
-            {"Test passport": 2, "Renamed afterwards": 1},
+            {"Test utility bill": 2, "Renamed afterwards": 1},
         )
 
     def test_countries_add_up_across_products(self):
-        other = Product.objects.create(name="Second", country=self.country, price=5)
+        other = self.make_product("Second", price="5")
         self.make_sale(self.start + timedelta(days=1), price="10")
         self.make_sale(self.start + timedelta(days=2), price="5", product=other)
 
@@ -231,82 +245,6 @@ class TopListTests(StatisticsFactoryMixin, TestCase):
 
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0]["revenue"], Decimal("15"))
-
-
-class StockForecastTests(StatisticsFactoryMixin, TestCase):
-    def test_days_left_follows_the_recent_sales_rate(self):
-        now = timezone.now()
-        self.make_stock(30)
-        # One sale a day over the 30-day window, so 30 units left is exactly 30 days of runway.
-        # The orders carry no allocations, so nothing is taken off the shelf here.
-        for day in range(30):
-            self.make_sale(now - timedelta(days=day, hours=1))
-
-        row = next(row for row in statistics.stock_forecast(now) if row["product"] == self.product.name)
-
-        self.assertEqual(row["available"], 30)
-        self.assertEqual(row["sold"], 30)
-        self.assertEqual(row["days_left"], Decimal(30))
-
-    def test_a_product_that_never_sells_has_no_runway_instead_of_a_division_by_zero(self):
-        self.make_stock(5)
-
-        row = statistics.stock_forecast(timezone.now())[0]
-
-        self.assertEqual(row["available"], 5)
-        self.assertIsNone(row["days_left"])
-
-    def test_sold_out_reads_as_zero_days_not_as_never(self):
-        now = timezone.now()
-        self.make_stock(1)
-        order = self.make_sale(now - timedelta(days=1))
-        item = order.items.first()
-        item.reserve()
-        item.deliver()
-
-        row = statistics.stock_forecast(now)[0]
-
-        self.assertEqual(row["available"], 0)
-        self.assertEqual(row["days_left"], Decimal(0))
-
-    def test_a_sold_out_seller_outranks_everything_that_still_has_a_runway(self):
-        now = timezone.now()
-        stocked = Product.objects.create(name="Still has some", country=self.country, price=10)
-        self.make_stock(10, product=stocked)
-        self.make_sale(now - timedelta(days=1), product=stocked)
-        # Sold its only unit and is still selling: every day it stays empty is a sale not made.
-        self.make_stock(1)
-        item = self.make_sale(now - timedelta(days=1)).items.first()
-        item.reserve()
-        item.deliver()
-
-        rows = statistics.stock_forecast(now)
-
-        self.assertEqual(rows[0]["product"], self.product.name)
-        self.assertEqual(rows[0]["days_left"], Decimal(0))
-        self.assertEqual(rows[1]["product"], stocked.name)
-
-    def test_nothing_selling_sinks_below_the_runways_and_empty_shelves_go_last(self):
-        # Neither sells, so neither has a runway to compare. The one with stock is money sitting
-        # still and worth a look; the empty one is nothing to lose and nothing to buy.
-        self.make_stock(5)
-        empty = Product.objects.create(name="Sold out and dead", country=self.country, price=10)
-
-        rows = statistics.stock_forecast(timezone.now())
-
-        self.assertEqual([row["product"] for row in rows], [self.product.name, empty.name])
-        self.assertIsNone(rows[-1]["days_left"])
-        self.assertEqual(rows[-1]["available"], 0)
-
-    def test_the_age_is_of_the_oldest_unit_still_on_the_shelf(self):
-        self.make_stock(3)
-        oldest = StockItem.objects.first()
-        StockItem.objects.filter(pk=oldest.pk).update(created_at=timezone.now() - timedelta(days=40))
-
-        age = statistics.stock_age(timezone.now())
-
-        self.assertEqual(age["available"], 3)
-        self.assertEqual(age["oldest_days"], 40)
 
 
 class TimeToPayTests(StatisticsFactoryMixin, TestCase):
@@ -326,7 +264,7 @@ class TimeToPayTests(StatisticsFactoryMixin, TestCase):
 
         self.assertEqual(statistics.time_to_pay(self.period)["median"], timedelta(minutes=25))
 
-    def test_orders_paid_after_the_reservation_expired_are_flagged(self):
+    def test_orders_paid_after_the_invoice_expired_are_flagged(self):
         self.pay_after(10)
         self.pay_after(120)
 
@@ -480,15 +418,9 @@ class RepeatCustomerTests(StatisticsFactoryMixin, TestCase):
 
 class DownloadRateTests(StatisticsFactoryMixin, TestCase):
     def deliver(self, downloads: int):
-        self.make_stock(1)
         order = self.make_sale(self.start + timedelta(days=1))
-        item = order.items.first()
-        item.reserve()
-        allocation = item.deliver()[0]
-        Allocation.objects.filter(pk=allocation.pk).update(
-            delivered_at=self.start + timedelta(days=1),
-            download_count=downloads,
-        )
+        order.deliver()
+        OrderItem.objects.filter(order=order).update(download_count=downloads)
 
     def test_the_share_is_of_files_taken_not_of_downloads(self):
         self.deliver(0)
@@ -540,38 +472,6 @@ class ChartLinkTests(StaffClientMixin, TestCase):
 
         self.assertEqual(changelist.status_code, 200)
         self.assertEqual([order.pk for order in changelist.context["cl"].result_list], [today.pk])
-
-
-class StockPaginationTests(StaffClientMixin, TestCase):
-    def setUp(self):
-        super().setUp()
-        for i in range(25):
-            self.make_stock(1, product=Product.objects.create(name=f"Product {i}", country=self.country, price=10))
-
-    def test_the_forecast_is_paginated_not_truncated(self):
-        first = self.client.get(self.url).context["stock_page"]
-        second = self.client.get(self.url, {"stock_page": "2"}).context["stock_page"]
-
-        # 25 products with stock, plus the mixin's own, which has none.
-        self.assertEqual(first.paginator.count, 26)
-        self.assertEqual(len(first.object_list), 20)
-        self.assertEqual(len(second.object_list), 6)
-        self.assertNotEqual(first.object_list[0]["product"], second.object_list[0]["product"])
-
-    def test_a_page_that_does_not_exist_shows_the_last_one(self):
-        page = self.client.get(self.url, {"stock_page": "nonsense"}).context["stock_page"]
-        beyond = self.client.get(self.url, {"stock_page": "99"}).context["stock_page"]
-
-        self.assertEqual(page.number, 1)
-        self.assertEqual(beyond.number, 2)
-
-    def test_paging_keeps_the_period(self):
-        response = self.client.get(self.url, {"preset": "7"})
-
-        second = next(item for item in response.context["stock_page_numbers"] if item["number"] == 2)
-
-        self.assertIn("preset=7", second["url"])
-        self.assertIn("stock_page=2", second["url"])
 
 
 class StatisticsPageTests(TestCase):
@@ -647,19 +547,10 @@ class CsvCoverageTests(StaffClientMixin, TestCase):
 
     def test_every_product_sold_is_in_the_export_not_just_the_top_ten(self):
         for i in range(12):
-            product = Product.objects.create(name=f"Product {i}", country=self.country, price=10)
+            product = self.make_product(f"Product {i}")
             self.make_sale(timezone.now() - timedelta(days=1), product=product, price=str(i + 1))
 
         body = self.client.get(reverse("admin:stats-export")).content.decode("utf-8")
 
         for i in range(12):
             self.assertIn(f"Product {i}", body)
-
-    def test_the_export_carries_the_whole_stock_forecast(self):
-        self.make_stock(3, product=Product.objects.create(name="Never sold", country=self.country, price=10))
-
-        body = self.client.get(reverse("admin:stats-export")).content.decode("utf-8")
-
-        self.assertIn("Stock right now", body)
-        # Nothing selling has no runway, and the cell is left empty rather than reading as zero.
-        self.assertIn("Never sold,Testland,3,0,\r\n", body)

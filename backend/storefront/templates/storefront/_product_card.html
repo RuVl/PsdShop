@@ -1,0 +1,24 @@
+{% load static i18n %}
+<div class="products-item" data-card="{{ product.document_type.slug }}" data-year="{{ product.year|default:'' }}">
+    <a class="product-item-image" href="{% url 'storefront:product' country=product.country.slug doctype=product.document_type.slug product_slug=product.url_slug %}">
+        {% if product.preview.card %}
+            <picture>
+                {% if product.preview.card_webp %}<source srcset="{{ product.preview.card_webp.url }}" type="image/webp">{% endif %}
+                <img src="{{ product.preview.card.url }}" alt="{{ product.name }}">
+            </picture>
+        {% endif %}
+    </a>
+    <div class="product-item-content">
+        <div class="product-item-badges">
+            <div class="badge text-small primary">{{ product.document_type.name }}</div>
+            {% if product.year %}<div class="badge-year text-small">{{ product.year }}</div>{% endif %}
+        </div>
+        <div class="product-item-title">
+            <a href="{% url 'storefront:product' country=product.country.slug doctype=product.document_type.slug product_slug=product.url_slug %}" class="product-item-title-link">{{ product.name }}</a>
+        </div>
+        <div class="product-item-prop-list">
+            <div class="product-item-prop-label">{% translate "Price" %}</div>
+            <div class="product-item-prop-content">$<span class="product-item-prop-value">{{ product.price }}</span></div>
+        </div>
+    </div>
+</div>

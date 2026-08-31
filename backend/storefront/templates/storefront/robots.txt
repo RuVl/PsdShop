@@ -1,0 +1,8 @@
+User-agent: *
+Disallow: /admin/
+Disallow: /api/
+Disallow: */cart/
+Disallow: */purchases/
+Disallow: */unsubscribe/
+
+Sitemap: {{ sitemap_url }}

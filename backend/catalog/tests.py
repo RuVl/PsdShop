@@ -1,199 +1,494 @@
-from django.forms import inlineformset_factory
+from decimal import Decimal
+from io import BytesIO, StringIO
+from unittest.mock import patch
+
+from django.contrib.auth import get_user_model
+from django.core.exceptions import ValidationError
+from django.core.files.base import ContentFile
+from django.core.management import call_command
+from django.core.management.base import CommandError
+from django.db.models import ProtectedError
 from django.test import TestCase
+from django.urls import reverse
 
-from catalog.admin import StockItemInlineFormSet, stock_item_state
-from catalog.models import Country, Product, StockItem
+from backend.testing import TempUploadsMixin
+from backend.urlspace import reserved_slugs
+from catalog.admin import ProductFileInput
+from catalog.models import IMAGE_FIELDS, IMAGE_VARIANTS, Country, DocumentType, Product, ProductImage
+from catalog.views import CatalogPagination
+from content.models import Page
 from customer.models import Customer
-from sales.models import Allocation, Order, OrderItem
+from sales.models import Order, OrderItem
 
 
-class DerivedStockTests(TestCase):
-    """Stock is derived from allocations, so there is no counter that can drift (ADR-0002)."""
+def png_bytes(width: int = 1600, height: int = 1200) -> bytes:
+    from PIL import Image
 
+    buffer = BytesIO()
+    Image.new("RGB", (width, height), (200, 210, 220)).save(buffer, format="PNG")
+    return buffer.getvalue()
+
+
+class CatalogFactoryMixin(TempUploadsMixin):
     def setUp(self):
-        self.country = Country.objects.create(name="Testland", code="tl")
-        self.product = Product.objects.create(name="Test", country=self.country, price=10)
-        for i in range(3):
-            StockItem.objects.create(file=f"products/{i}.pdf", product=self.product)
+        super().setUp()
+        self.country = Country.objects.create(name="Germany", slug="germany", code="de")
+        self.document_type = DocumentType.objects.create(name="Utility bill", slug="utility-bill")
 
-        customer = Customer.objects.create(email="buyer@example.com")
-        self.order = Order.objects.create(customer=customer, total_price=10)
-        self.item = OrderItem.objects.create(
-            order=self.order,
-            product=self.product,
-            product_name=self.product.name,
-            unit_price=self.product.price,
-            unit_price_usd=10,
-            quantity=2,
-        )
-
-    def test_untouched_units_are_available(self):
-        self.assertEqual(StockItem.objects.available().count(), 3)
-        self.assertEqual(self.product.available_count(), 3)
-        self.assertEqual(Product.objects.with_available().get(pk=self.product.pk).available, 3)
-
-    def test_reserved_units_leave_stock(self):
-        self.item.reserve()
-
-        self.assertEqual(self.product.available_count(), 1)
-        self.assertEqual(Product.objects.with_available().get(pk=self.product.pk).available, 1)
-
-    def test_delivered_units_stay_out_of_stock(self):
-        self.item.reserve()
-        self.item.deliver()
-
-        self.assertEqual(self.product.available_count(), 1)
-
-    def test_released_units_come_back(self):
-        self.item.reserve()
-        self.item.release()
-
-        self.assertEqual(self.product.available_count(), 3)
-        self.assertTrue(all(unit.is_available() for unit in StockItem.objects.all()))
-
-    def test_with_available_reports_zero_for_empty_product(self):
-        empty = Product.objects.create(name="Empty", country=self.country, price=10)
-
-        self.assertEqual(Product.objects.with_available().get(pk=empty.pk).available, 0)
-
-    def test_stock_of_other_products_is_not_counted(self):
-        other = Product.objects.create(name="Other", country=self.country, price=10)
-        StockItem.objects.create(file="products/other.pdf", product=other)
-
-        self.assertEqual(self.product.available_count(), 3)
-        self.assertEqual(other.available_count(), 1)
-
-
-class CountryFlagTests(TestCase):
-    def test_code2flag(self):
-        self.assertEqual(Country.code2flag("al"), "🇦🇱")
-        self.assertEqual(Country.code2flag(None), "")
-
-    def test_non_country_group_has_no_flag(self):
-        self.assertEqual(Country(name="Other", code="-").flag, "-")
-
-
-class AllocationConstraintTests(TestCase):
-    """The partial unique index is what makes "one file - one buyer" physically true."""
-
-    def setUp(self):
-        country = Country.objects.create(name="Testland", code="tl")
-        self.product = Product.objects.create(name="Test", country=country, price=10)
-        self.unit = StockItem.objects.create(file="products/a.pdf", product=self.product)
-
-        customer = Customer.objects.create(email="buyer@example.com")
-        self.order = Order.objects.create(customer=customer, total_price=10)
-
-    def _make_item(self):
-        return OrderItem.objects.create(
-            order=self.order,
-            product=self.product,
-            product_name=self.product.name,
-            unit_price=self.product.price,
-            unit_price_usd=10,
-            quantity=1,
-        )
-
-    def test_second_active_allocation_of_the_same_unit_is_rejected(self):
-        first = self._make_item()
-        first.reserve()
-
-        second = self._make_item()
-        with self.assertRaises(ValueError):
-            # Nothing left to allocate: the only unit is held by the first item.
-            second.reserve()
-
-    def test_released_unit_can_be_allocated_again(self):
-        first = self._make_item()
-        first.reserve()
-        first.release()
-
-        second = self._make_item()
-        second.reserve()
-
-        self.assertEqual(Allocation.objects.filter(state=Allocation.State.RESERVED).count(), 1)
-        self.assertEqual(Allocation.objects.count(), 2)
-
-
-class StockItemAdminTests(TestCase):
-    """The Product page lists units inline, and that table must not be a way around the FK guard."""
-
-    def setUp(self):
-        self.country = Country.objects.create(name="Testland", code="tl")
-        self.product = Product.objects.create(name="Test", country=self.country, price=10)
-        self.unit = StockItem.objects.create(file="products/held.pdf", product=self.product)
-
-        customer = Customer.objects.create(email="buyer@example.com")
-        order = Order.objects.create(customer=customer, total_price=10)
-        self.item = OrderItem.objects.create(
-            order=order,
-            product=self.product,
-            product_name=self.product.name,
-            unit_price=self.product.price,
-            unit_price_usd=10,
-            quantity=1,
-        )
-
-    def formset(self, delete: bool):
-        # The same formset the Product page builds for its StockItem inline.
-        formset_cls = inlineformset_factory(
-            Product, StockItem, formset=StockItemInlineFormSet, fields=["file"], extra=0
-        )
-        data = {
-            "stock_items-TOTAL_FORMS": "1",
-            "stock_items-INITIAL_FORMS": "1",
-            "stock_items-MIN_NUM_FORMS": "0",
-            "stock_items-MAX_NUM_FORMS": "1000",
-            "stock_items-0-id": str(self.unit.pk),
-            "stock_items-0-product": str(self.product.pk),
-            "stock_items-0-file": self.unit.file.name,
+    def make_product(self, name: str = "Germany utility bill 2022", **overrides) -> Product:
+        fields = {
+            "name": name,
+            "slug": overrides.pop("slug", "germany-utility-bill-2022"),
+            "country": self.country,
+            "document_type": self.document_type,
+            "year": 2022,
+            "price": Decimal("25.00"),
+            "file": ContentFile(b"template", name="template.psd"),
         }
-        if delete:
-            data["stock_items-0-DELETE"] = "on"
-
-        return formset_cls(data=data, instance=self.product, prefix="stock_items")
-
-    def test_deleting_a_held_unit_is_rejected(self):
-        Allocation.objects.create(order_item=self.item, stock_item=self.unit, state=Allocation.State.DELIVERED)
-
-        formset = self.formset(delete=True)
-
-        self.assertFalse(formset.is_valid())
-        self.assertIn("held by an order", str(formset.non_form_errors()))
-
-    def test_deleting_a_free_unit_is_allowed(self):
-        self.assertTrue(self.formset(delete=True).is_valid())
-
-    def test_state_column_calls_a_reserved_unit_reserved(self):
-        Allocation.objects.create(order_item=self.item, stock_item=self.unit, state=Allocation.State.RESERVED)
-
-        self.assertEqual(stock_item_state(self.unit), "Reserved")
-        self.assertFalse(self.unit.is_available())
+        fields.update(overrides)
+        return Product.objects.create(**fields)
 
 
-class CountryApiTests(TestCase):
-    """The storefront payload. R2 dropped the passport-era key names, so their shape is pinned here."""
+class SlugTests(CatalogFactoryMixin, TestCase):
+    """A country slug sits in the same URL position as a service path (/cart) and as a page."""
+
+    def test_a_reserved_slug_is_refused(self):
+        country = Country(name="Cart", slug="cart", code="xx")
+
+        with self.assertRaises(ValidationError):
+            country.full_clean()
+
+    def test_the_wildcard_segment_is_reserved(self):
+        self.assertIn("all", reserved_slugs())
+
+        with self.assertRaises(ValidationError):
+            DocumentType(name="Everything", slug="all").full_clean()
+
+    def test_a_document_type_cannot_shadow_a_service_path(self):
+        with self.assertRaises(ValidationError):
+            DocumentType(name="Purchases", slug="purchases").full_clean()
+
+    def test_a_language_prefix_is_reserved(self):
+        """The codes come from settings.LANGUAGES, not from a second list to keep in step."""
+
+        with self.assertRaises(ValidationError):
+            Country(name="English", slug="en", code="gb").full_clean()
+
+    def test_the_media_root_is_reserved(self):
+        """Derived from MEDIA_URL - nginx answers there, so a country cannot."""
+
+        with self.assertRaises(ValidationError):
+            Country(name="Media", slug="media", code="xx").full_clean()
+
+    def test_a_country_cannot_shadow_a_page(self):
+        Page.objects.create(slug="contacts", title="Contacts")
+
+        with self.assertRaises(ValidationError):
+            Country(name="Contacts", slug="contacts", code="xx").full_clean()
+
+    def test_a_document_type_may_repeat_a_country_slug(self):
+        """A type is addressed under a country, so the two never share a position."""
+
+        DocumentType(name="Germany", slug=self.country.slug).full_clean()
+
+    def test_an_ordinary_slug_passes(self):
+        Country(name="Poland", slug="poland", code="pl").full_clean()
+
+    def test_the_url_segment_carries_the_id(self):
+        product = self.make_product()
+
+        self.assertEqual(product.url_slug, f"{product.pk}-germany-utility-bill-2022")
+
+
+class CountingTests(CatalogFactoryMixin, TestCase):
+    """The sidebar counts what a visitor can actually buy."""
+
+    def test_inactive_products_are_not_counted(self):
+        self.make_product(slug="live-one")
+        self.make_product(name="Draft", slug="draft-one", is_active=False)
+
+        country = Country.objects.with_product_counts().get(pk=self.country.pk)
+
+        self.assertEqual(country.products_count, 1)
+
+    def test_an_empty_country_is_left_out_of_the_sidebar(self):
+        Country.objects.create(name="Portugal", slug="portugal", code="pt")
+        self.make_product()
+
+        slugs = [country.slug for country in Country.objects.non_empty()]
+
+        self.assertEqual(slugs, ["germany"])
+
+    def test_active_filters_the_storefront_queryset(self):
+        self.make_product(slug="live-one")
+        self.make_product(name="Draft", slug="draft-one", is_active=False)
+
+        self.assertEqual(Product.objects.active().count(), 1)
+
+
+class ProductImageTests(CatalogFactoryMixin, TestCase):
+    """The owner uploads one file; the storefront must never serve that original."""
 
     def setUp(self):
-        self.country = Country.objects.create(name="Testland", code="tl")
-        self.product = Product.objects.create(name="Test", country=self.country, price=10)
-        for i in range(2):
-            StockItem.objects.create(file=f"products/{i}.pdf", product=self.product)
+        super().setUp()
+        self.product = self.make_product()
 
-    def test_countries_carry_products_with_their_available_count(self):
-        response = self.client.get("/api/countries/")
+    def add_image(self, **overrides) -> ProductImage:
+        return ProductImage.objects.create(
+            product=self.product,
+            image=ContentFile(png_bytes(), name="scan.png"),
+            **overrides,
+        )
+
+    def test_every_variant_is_generated(self):
+        image = self.add_image()
+
+        for field in IMAGE_FIELDS:
+            self.assertTrue(getattr(image, field), f"{field} was not generated")
+
+    def test_variants_are_resized_and_keep_the_aspect_ratio(self):
+        image = self.add_image()
+
+        self.assertEqual(image.card.width, IMAGE_VARIANTS["card"])
+        self.assertEqual(image.page.width, IMAGE_VARIANTS["page"])
+        # 1600x1200 is 4:3, and thumbnail() keeps it.
+        self.assertEqual(image.card.height, round(IMAGE_VARIANTS["card"] * 3 / 4))
+
+    def test_replacing_the_upload_rebuilds_the_variants(self):
+        image = self.add_image()
+        first_card = image.card.name
+
+        image.image = ContentFile(png_bytes(800, 800), name="other.png")
+        image.save()
+
+        self.assertNotEqual(image.card.name, first_card)
+        self.assertFalse((self.media / first_card).exists(), "the previous variant was left on disk")
+
+    def test_replacing_the_upload_drops_the_previous_original(self):
+        image = ProductImage.objects.get(pk=self.add_image().pk)
+        first_original = image.image.name
+
+        image.image = ContentFile(png_bytes(800, 800), name="other.png")
+        image.save()
+
+        self.assertNotEqual(image.image.name, first_original)
+        self.assertFalse((self.media / first_original).exists(), "the previous original was left on disk")
+
+    def test_deleting_the_row_takes_every_file_with_it(self):
+        image = self.add_image()
+        paths = [self.media / getattr(image, field).name for field in ("image", *IMAGE_FIELDS)]
+        self.assertTrue(all(path.exists() for path in paths))
+
+        image.delete()
+
+        self.assertEqual([path for path in paths if path.exists()], [])
+
+    def test_a_queryset_delete_also_cleans_up(self):
+        """The signal, not `delete()`, is what makes this true - the admin deletes in bulk."""
+
+        image = self.add_image()
+        card = self.media / image.card.name
+
+        ProductImage.objects.all().delete()
+
+        self.assertFalse(card.exists())
+
+    def test_the_card_preview_is_the_first_image(self):
+        second = self.add_image(position=2)
+        first = self.add_image(position=1)
+
+        self.assertEqual(self.product.preview.pk, first.pk)
+        self.assertNotEqual(self.product.preview.pk, second.pk)
+
+    def test_a_product_without_images_has_no_preview(self):
+        self.assertIsNone(self.product.preview)
+
+
+class ProductFileTests(CatalogFactoryMixin, TestCase):
+    """The paid file is the product; it must be nowhere near what the site serves openly."""
+
+    def test_the_file_is_written_outside_media_root(self):
+        product = self.make_product()
+
+        self.assertTrue((self.private / product.file.name).exists())
+        self.assertEqual(list(self.media.iterdir()), [])
+
+    def test_the_file_has_no_url(self):
+        """`base_url` is unset on purpose - nothing may build a link to a paid file by accident."""
+
+        product = self.make_product()
+
+        with self.assertRaises(ValueError):
+            product.file.url  # noqa: B018
+
+    def test_deleting_the_product_takes_its_file(self):
+        product = self.make_product()
+        path = self.private / product.file.name
+
+        product.delete()
+
+        self.assertFalse(path.exists())
+
+    def test_replacing_the_file_drops_the_previous_one(self):
+        product = Product.objects.get(pk=self.make_product().pk)
+        first = self.private / product.file.name
+
+        product.file = ContentFile(b"newer", name="replacement.psd")
+        product.save()
+
+        self.assertFalse(first.exists())
+        self.assertTrue((self.private / product.file.name).exists())
+
+
+class ProductAdminTests(CatalogFactoryMixin, TestCase):
+    """The change page renders a field whose storage refuses to build a URL (ADR-0001)."""
+
+    def setUp(self):
+        super().setUp()
+        self.client.force_login(
+            get_user_model().objects.create_superuser(username="staff", email="staff@example.com", password="x")
+        )
+
+    def change_url(self, product: Product) -> str:
+        return reverse("admin:catalog_product_change", args=[product.pk])
+
+    def test_the_change_page_renders_a_product_with_a_file(self):
+        product = self.make_product()
+
+        response = self.client.get(self.change_url(product))
 
         self.assertEqual(response.status_code, 200)
-        country = response.json()[0]
-        self.assertNotIn("passports", country)
+        self.assertContains(response, product.file.name)
 
-        product = country["products"][0]
-        self.assertEqual(product["available"], 2)
-        self.assertNotIn("quantity", product)
+    def test_the_page_does_not_link_the_paid_file(self):
+        """A link would be a path into PRODUCT_FILES_ROOT, which nothing serves."""
 
-    def test_a_product_nobody_can_buy_is_hidden(self):
-        empty = Product.objects.create(name="Empty", country=self.country, price=10)
+        product = self.make_product()
 
-        names = [p["name_en"] for p in self.client.get("/api/countries/").json()[0]["products"]]
+        response = self.client.get(self.change_url(product))
 
-        self.assertNotIn(empty.name, names)
+        self.assertNotContains(response, f"{product.file.name}</a>")
+
+    def test_the_add_page_renders(self):
+        """No file yet, so the widget takes its other branch."""
+
+        response = self.client.get(reverse("admin:catalog_product_add"))
+
+        self.assertEqual(response.status_code, 200)
+
+    def test_a_file_that_has_a_url_is_still_linked(self):
+        """The widget is not "never link" - it is "link when the storage publishes one"."""
+
+        image = ProductImage.objects.create(product=self.make_product(), image=ContentFile(png_bytes(), name="a.png"))
+
+        self.assertEqual(ProductFileInput.value_url(image.image), image.image.url)
+
+    def test_a_file_without_a_url_reads_as_no_url(self):
+        product = self.make_product()
+
+        self.assertEqual(ProductFileInput.value_url(product.file), "")
+
+
+class ProductDeletionTests(CatalogFactoryMixin, TestCase):
+    """A sold template has to stay downloadable, so the catalogue cannot drop it (ADR-0001)."""
+
+    def test_a_bought_product_cannot_be_deleted(self):
+        product = self.make_product()
+        customer = Customer.objects.create(email="buyer@example.com")
+        order = Order.objects.create(customer=customer, total_price=product.price)
+        OrderItem.objects.create(
+            order=order,
+            product=product,
+            product_name=product.name,
+            unit_price=product.price,
+        )
+
+        with self.assertRaises(ProtectedError):
+            product.delete()
+
+        self.assertTrue(Product.objects.filter(pk=product.pk).exists())
+
+    def test_an_unsold_product_can_be_deleted(self):
+        product = self.make_product()
+
+        product.delete()
+
+        self.assertFalse(Product.objects.filter(pk=product.pk).exists())
+
+    def test_seeding_over_a_sold_catalog_explains_itself(self):
+        """`seed_testdata --flush` runs into the same PROTECT - it has to say so, not traceback."""
+
+        product = self.make_product()
+        customer = Customer.objects.create(email="buyer@example.com")
+        order = Order.objects.create(customer=customer, total_price=product.price)
+        OrderItem.objects.create(order=order, product=product, product_name=product.name, unit_price=product.price)
+
+        with self.assertRaises(CommandError) as caught:
+            call_command("seed_testdata", "--flush", "--images", "0", stdout=StringIO())
+
+        self.assertIn(str(order.pk), str(caught.exception))
+
+    def test_taking_a_product_off_the_shelf_is_a_flag(self):
+        product = self.make_product()
+
+        product.is_active = False
+        product.save(update_fields=["is_active"])
+
+        self.assertNotIn(product, Product.objects.active())
+        self.assertTrue(Product.objects.filter(pk=product.pk).exists())
+
+
+class FlagTests(TestCase):
+    def test_a_code_becomes_an_emoji_flag(self):
+        self.assertEqual(Country(code="de").flag, "🇩🇪")
+
+    def test_no_code_means_no_flag(self):
+        self.assertEqual(Country(code="").flag, "")
+
+
+class CatalogApiTests(CatalogFactoryMixin, TestCase):
+    """The JSON the SPA reads mirrors the bot listing: same sets, same 404s, both languages."""
+
+    def setUp(self):
+        super().setUp()
+        self.product = self.make_product(name_en="Germany utility bill 2022", name_ru="Германия счёт 2022")
+        # A country with nothing on the shelf must not reach the sidebar payload.
+        Country.objects.create(name="Portugal", slug="portugal", code="pt")
+
+    def test_countries_carry_both_languages_and_counts(self):
+        (row,) = self.client.get("/api/catalog/countries/").json()
+        self.assertEqual(row["slug"], "germany")
+        self.assertEqual(row["flag"], "🇩🇪")
+        self.assertEqual(row["products_count"], 1)
+        self.assertIn("name_en", row)
+        self.assertIn("name_ru", row)
+
+    def test_document_types_skip_empty(self):
+        DocumentType.objects.create(name="Tax", slug="tax")
+        slugs = [row["slug"] for row in self.client.get("/api/catalog/document-types/").json()]
+        self.assertEqual(slugs, ["utility-bill"])
+
+    def test_products_filter_by_slugs(self):
+        response = self.client.get("/api/catalog/products/", {"country": "germany", "type": "utility-bill"})
+        payload = response.json()
+        self.assertEqual(payload["count"], 1)
+        (row,) = payload["results"]
+        self.assertEqual(row["url_slug"], self.product.url_slug)
+        self.assertEqual(row["country"], "germany")
+        self.assertEqual(row["name_ru"], "Германия счёт 2022")
+
+    def test_unknown_filter_slug_is_404_like_the_bot_page(self):
+        self.assertEqual(self.client.get("/api/catalog/products/", {"country": "atlantis"}).status_code, 404)
+
+    def test_all_means_any(self):
+        payload = self.client.get("/api/catalog/products/", {"country": "all", "type": "all"}).json()
+        self.assertEqual(payload["count"], 1)
+
+    def test_the_grid_payload_says_how_many_pages_there_are(self):
+        """The SPA reads `total_pages` instead of keeping its own copy of the page size."""
+        self.make_product(slug="second")
+        self.make_product(slug="third")
+
+        with patch.object(CatalogPagination, "page_size", 2):
+            payload = self.client.get("/api/catalog/products/").json()
+
+        self.assertEqual(payload["count"], 3)
+        self.assertEqual(payload["total_pages"], 2)
+
+    def test_a_page_past_the_end_is_404(self):
+        """What the grid's overshoot correction rests on: page 2 of a one-page listing is a 404."""
+        self.assertEqual(self.client.get("/api/catalog/products/", {"page": 2}).status_code, 404)
+
+    def test_inactive_products_stay_out(self):
+        self.make_product(slug="hidden", is_active=False)
+        self.assertEqual(self.client.get("/api/catalog/products/").json()["count"], 1)
+
+    def test_detail_carries_description_and_gallery(self):
+        row = self.client.get(f"/api/catalog/products/{self.product.pk}/").json()
+        self.assertIn("description_en", row)
+        self.assertEqual(row["images"], [])
+        self.assertIsNone(row["preview"])
+
+    def test_detail_of_inactive_product_is_404(self):
+        hidden = self.make_product(slug="hidden", is_active=False)
+        self.assertEqual(self.client.get(f"/api/catalog/products/{hidden.pk}/").status_code, 404)
+
+
+class ProductSearchTests(CatalogFactoryMixin, TestCase):
+    """`?q=` on the grid: both languages, literal characters, and a cap on the string."""
+
+    def setUp(self):
+        super().setUp()
+        self.bill = self.make_product(
+            slug="germany-bill", name_en="Germany utility bill 2022", name_ru="Германия счёт 2022"
+        )
+        self.statement = self.make_product(
+            slug="germany-statement", name_en="Germany bank statement", name_ru="Германия банковская выписка"
+        )
+
+    def search(self, query, **params):
+        return self.client.get("/api/catalog/products/", {"q": query, **params}).json()
+
+    def test_finds_by_english_name_whatever_the_case(self):
+        payload = self.search("BANK")
+        self.assertEqual(payload["count"], 1)
+        self.assertEqual(payload["results"][0]["url_slug"], self.statement.url_slug)
+
+    def test_finds_by_russian_name(self):
+        payload = self.search("выписка")
+        self.assertEqual(payload["count"], 1)
+        self.assertEqual(payload["results"][0]["url_slug"], self.statement.url_slug)
+
+    def test_an_empty_query_filters_nothing(self):
+        for query in ["", "   "]:
+            with self.subTest(query=query):
+                self.assertEqual(self.search(query)["count"], 2)
+
+    def test_nothing_found_is_an_empty_page_not_a_404(self):
+        response = self.client.get("/api/catalog/products/", {"q": "atlantis"})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["count"], 0)
+
+    def test_like_wildcards_are_searched_literally(self):
+        discounted = self.make_product(slug="percent", name_en="50% off bill", name_ru="Скидка 50%")
+        self.assertEqual(self.search("%")["results"][0]["url_slug"], discounted.url_slug)
+        # `_` matches one character in LIKE; escaped, it matches nothing here.
+        self.assertEqual(self.search("_")["count"], 0)
+
+    def test_a_long_query_is_cut_instead_of_scanned_whole(self):
+        long_name = "x" * 150
+        wanted = self.make_product(slug="long-name", name_en=long_name, name_ru=long_name)
+        # Only the first 100 characters are looked at, so the tail cannot turn a hit into a miss.
+        payload = self.search("x" * 100 + "y" * 400)
+        self.assertEqual(payload["count"], 1)
+        self.assertEqual(payload["results"][0]["url_slug"], wanted.url_slug)
+
+    def test_search_stacks_with_the_facets(self):
+        other = Country.objects.create(name="Portugal", slug="portugal", code="pt")
+        self.make_product(slug="portugal-bill", name_en="Portugal utility bill", country=other)
+
+        payload = self.search("bill", country="germany", type="utility-bill")
+        self.assertEqual(payload["count"], 1)
+        self.assertEqual(payload["results"][0]["url_slug"], self.bill.url_slug)
+
+    def test_hidden_products_are_not_searchable(self):
+        self.make_product(slug="hidden-bill", name_en="Germany utility bill hidden", is_active=False)
+        self.assertEqual(self.search("utility bill")["count"], 1)
+
+    def test_pagination_counts_the_found_set(self):
+        for index in range(30):
+            self.make_product(
+                slug=f"flood-{index}", name_en=f"Flooded bill {index}", name_ru=f"Затопленный счёт {index}"
+            )
+
+        # A page size of its own: what is asserted here is that the search, not the whole catalog,
+        # is what gets paginated - it must not break the day the shop shows more cards per page.
+        with patch.object(CatalogPagination, "page_size", 24):
+            first = self.search("Flooded")
+            self.assertEqual(first["count"], 30)
+            self.assertEqual(first["total_pages"], 2)
+            self.assertEqual(len(first["results"]), 24)
+
+            second = self.search("Flooded", page=2)
+            self.assertEqual(len(second["results"]), 6)
+            self.assertEqual(self.client.get("/api/catalog/products/", {"q": "Flooded", "page": 3}).status_code, 404)

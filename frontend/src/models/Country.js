@@ -1,26 +1,8 @@
-import TranslatableModel from './TranslatableModel';
-import Product from "@/models/Product.js";
-import {assign} from "lodash";
+import Localized from '@/models/Localized.js';
 
-export default class Country extends TranslatableModel {
-    constructor(data) {
-        super(data);
-
-        this.id = data.id;
-        this.code = data.code;
-        this.products = data.products;
-    }
-
-    static fromApi(country) {
-        const data = {
-            id: parseInt(country.id),
-            code: country.code,
-            products: country.products.map(product => Product.fromApi(product, country)),
-        };
-        return new Country(assign(country, data));
-    }
-
-    getTranslationFields() {
-        return ['name'];
-    }
+// A country of the catalog: one segment of every listing URL, one row of the sidebar.
+export default class Country extends Localized {
+    static translated = ['name', 'seo_text'];
 }
+
+Country.defineTranslations();

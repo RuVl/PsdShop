@@ -12,7 +12,7 @@
 #        make init          — с нуля: deps → .env → install → pre-commit →
 #                              dev-postgres → миграции (НЕ поднимает `up`!)
 #        make dev-backend   — runserver на хосте (:8000)
-#        make front-dev     — vite dev-сервер (:5173)
+#        make dev-frontend  — vite dev-сервер (http://localhost:5173/, нужен dev-backend)
 #
 # Оба сценария используют один и тот же volume psdshop_postgres (общие данные,
 # осознанно), но это РАЗНЫЕ контейнеры postgres — не поднимайте оба одновременно.
@@ -26,6 +26,12 @@
 #   make help   — полный список целей
 
 COMPOSE     ?= docker compose
+# nginx -t гоняется в стоковом образе с примонтированным frontend/nginx: ни сборки нашего образа,
+# ни настоящих сертификатов для проверки синтаксиса не нужно (--add-host: upstream `backend`
+# резолвится только внутри compose-сети).
+DOCKER       ?= docker
+NGINX_IMAGE  ?= docker.io/library/nginx:1.26.0
+NGINX_DOMAIN ?= example.com
 COMPOSE_DEV ?= docker compose -f docker-compose.dev.yaml
 UV          ?= uv
 RUFF        ?= uvx ruff@0.15.12
@@ -47,11 +53,14 @@ MANAGE_DEV ?= cd backend && $(UV) run --env-file .env --env-file dev.env python 
 # Читаем через Python (splitlines корректно срезает CRLF), лениво — только когда переменная нужна.
 PG_USER ?= $(shell $(UV) run --no-project python -c "import pathlib; p=pathlib.Path('postgres/.env'); vals=[l.split('=',1)[1].strip() for l in (p.read_text(encoding='utf-8').splitlines() if p.exists() else []) if l.startswith('POSTGRES_USER=')]; print(vals[0] if vals else 'user')")
 PG_DB   ?= $(shell $(UV) run --no-project python -c "import pathlib; p=pathlib.Path('postgres/.env'); vals=[l.split('=',1)[1].strip() for l in (p.read_text(encoding='utf-8').splitlines() if p.exists() else []) if l.startswith('POSTGRES_DB=')]; print(vals[0] if vals else 'database')")
-DUMP    ?= backups/dump.sql
+# Папка, которую docker-compose монтирует в контейнер postgres (там же лежат крон-бэкапы).
+DUMP    ?= postgres/backups/dump.sql
 m       ?=
 c       ?=
 FORCE   ?=
 FRONT   ?=
+DEV_HOST ?= 0.0.0.0
+DEV_PORT ?= 8000
 
 .DEFAULT_GOAL := help
 
@@ -68,7 +77,7 @@ init: ## Подготовить окружение с нуля (deps → .env �
 	$(MAKE) install
 	$(MAKE) pre-commit-install
 	$(MAKE) dev-migrate
-	@echo "OK: dev-postgres поднят, миграции применены. Дальше: make dev-backend (backend :8000) и make front-dev (frontend :5173). Статус dev-postgres: docker compose -f docker-compose.dev.yaml ps"
+	@echo "OK: dev-postgres поднят, миграции применены. Дальше: make dev-backend (backend :8000) и make dev-frontend (витрина на http://localhost:5173/). Статус dev-postgres: docker compose -f docker-compose.dev.yaml ps"
 
 .PHONY: check-deps
 check-deps: ## Проверить наличие uv и docker compose
@@ -161,6 +170,14 @@ dev-reset: ## Пересоздать контейнер dev-postgres (сохра
 	$(COMPOSE_DEV) up -d --build --wait
 	@echo "OK: dev-postgres пересоздан."
 
+.PHONY: dev-nuke
+dev-nuke: ## УДАЛИТЬ dev-БД вместе с volume psdshop_postgres и поднять пустую
+	@echo "ВНИМАНИЕ: volume psdshop_postgres будет удалён вместе со всеми данными."
+	@echo "Нужно после перегенерации миграций: старая БД помнит удалённые файлы миграций."
+	$(COMPOSE_DEV) down -v
+	$(COMPOSE_DEV) up -d --build --wait
+	@echo "OK: пустая dev-БД поднята. Дальше: make dev-migrate"
+
 .PHONY: dev-manage
 dev-manage: dev-infra ## Произвольная manage.py команда локально (dev-БД): make dev-manage c="seed_testdata --flush"
 	$(MANAGE_DEV) $(c)
@@ -170,8 +187,8 @@ dev-migrate: dev-infra ## Миграции локальным backend в dev-Б�
 	$(MANAGE_DEV) migrate
 
 .PHONY: dev-backend
-dev-backend: dev-infra ## Запустить backend локально (runserver 0.0.0.0:8000)
-	$(MANAGE_DEV) runserver 0.0.0.0:8000
+dev-backend: dev-infra ## Запустить backend локально (runserver HOST:PORT; по умолчанию 0.0.0.0:8000)
+	$(MANAGE_DEV) runserver $(DEV_HOST):$(DEV_PORT)
 
 .PHONY: dev-superuser
 dev-superuser: dev-infra ## Создать суперпользователя в dev-БД
@@ -179,7 +196,7 @@ dev-superuser: dev-infra ## Создать суперпользователя в
 
 .PHONY: dev-test
 dev-test: dev-infra dev-compilemessages ## Тесты локальным backend (t="sales.tests.DeliverTests" - только часть)
-	$(MANAGE_DEV) test $(if $(t),$(t),catalog customer mailing sales)
+	$(MANAGE_DEV) test $(if $(t),$(t),catalog content customer mailing sales storefront)
 
 .PHONY: dev-messages
 dev-messages: ## Пересобрать backend/locale/ru/.../django.po из исходников (нужен gettext)
@@ -200,12 +217,12 @@ migrate: ## Применить миграции
 	$(MANAGE) migrate
 
 .PHONY: makemigrations
-makemigrations: ## Создать миграции: make makemigrations m="catalog customer sales"
+makemigrations: ## Создать миграции: make makemigrations m="catalog content customer sales"
 	$(MANAGE) makemigrations $(m)
 
 .PHONY: test
 test: compilemessages ## Тесты в контейнере (t="sales" - только часть)
-	$(MANAGE) test $(if $(t),$(t),catalog customer mailing sales)
+	$(MANAGE) test $(if $(t),$(t),catalog content customer mailing sales storefront)
 
 .PHONY: collectstatic
 collectstatic: ## Собрать статику
@@ -224,14 +241,6 @@ superuser: ## Создать суперпользователя
 	$(MANAGE) createsuperuser
 
 # --- Доменные команды -------------------------------------------------------
-
-.PHONY: update-rates
-update-rates: ## Обновить курсы валют (djmoney)
-	$(MANAGE) update_rates
-
-.PHONY: expire
-expire: ## Снять резерв с просроченных заказов
-	$(MANAGE) expire_transactions
 
 .PHONY: broadcast
 broadcast: ## Разослать письма из очереди (QUEUED); флаги: c="--id N --dry-run --test"
@@ -266,12 +275,28 @@ psql: ## Интерактивный psql в контейнере
 # --- Фронтенд ---------------------------------------------------------------
 
 .PHONY: dev-frontend
-dev-frontend: ## Vite dev-сервер (0.0.0.0:5173)
+dev-frontend: ## Vite dev-сервер (http://localhost:5173/; /static, /media и /api берёт с dev-backend)
 	cd frontend && npm run dev
 
-.PHONY: dev-frontend-build
-dev-frontend-build: ## Production-сборка фронтенда
+.PHONY: spa
+spa: ## Собрать SPA: ассеты в backend/.../static/storefront/spa, shell.html в шаблоны Django
 	cd frontend && npm run build
+
+# --- nginx ------------------------------------------------------------------
+
+.PHONY: nginx-check
+nginx-check: ## Проверить конфиг nginx (envsubst + nginx -t в одноразовом контейнере)
+	$(DOCKER) run --rm --add-host backend:127.0.0.1 -v "$(CURDIR)/frontend/nginx:/conf:ro" \
+	  -e DOMAIN=$(NGINX_DOMAIN) $(NGINX_IMAGE) sh -c '\
+	  apt-get -qq update >/dev/null && apt-get -qq install -y gettext-base >/dev/null; \
+	  openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj "/CN=$$DOMAIN" \
+	    -keyout /etc/ssl/$$DOMAIN.key -out /etc/ssl/$$DOMAIN.crt >/dev/null 2>&1; \
+	  cp /conf/00-limits.conf /etc/nginx/conf.d/00-limits.conf; \
+	  cp /conf/proxy-backend.conf /etc/nginx/proxy-backend.conf; \
+	  cp /conf/site-body.conf /etc/nginx/site-body.conf; \
+	  rm -f /etc/nginx/conf.d/default.conf; \
+	  envsubst "\$$DOMAIN" < /conf/site.conf.template > /etc/nginx/conf.d/site.conf; \
+	  mkdir -p /usr/www/logs; nginx -t'
 
 # --- Качество кода ----------------------------------------------------------
 
@@ -296,10 +321,10 @@ format: ## ruff format + автофиксы
 # --- Очистка ----------------------------------------------------------------
 
 .PHONY: clean
-clean: ## Удалить кэши (pycache, ruff); FRONT=1 - также frontend/node_modules и frontend/dist
+clean: ## Удалить кэши (pycache, ruff); FRONT=1 - также node_modules и собранный SPA
 	@$(UV) run --no-project python -c "import pathlib, shutil; [shutil.rmtree(p, ignore_errors=True) for n in ('__pycache__','.ruff_cache') for p in pathlib.Path('.').rglob(n)]"
 ifeq ($(FRONT),1)
-	@$(UV) run --no-project python -c "import shutil; [shutil.rmtree(p, ignore_errors=True) for p in ('frontend/node_modules', 'frontend/dist')]"
-	@echo "OK: node_modules и dist фронтенда удалены"
+	@$(UV) run --no-project python -c "import pathlib, shutil; [shutil.rmtree(p, ignore_errors=True) for p in ('frontend/node_modules', 'backend/storefront/static/storefront/spa')]; pathlib.Path('backend/storefront/templates/storefront/shell.html').unlink(missing_ok=True)"
+	@echo "OK: node_modules и сборка SPA удалены (вернуть: make install-frontend && make spa)"
 endif
 	@echo "OK: кэши очищены"

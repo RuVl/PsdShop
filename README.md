@@ -5,7 +5,8 @@ link to a purchases page where every bought file can be downloaded. Vue 3 SPA + 
 Framework + PostgreSQL, behind nginx in Docker Compose.
 
 The domain vocabulary is in [`CONTEXT.md`](./CONTEXT.md), the decisions in [`docs/adr/`](./docs/adr/),
-the state of the rework in [`docs/plan.md`](./docs/plan.md).
+the smaller ones in [`docs/journal.md`](./docs/journal.md), and the state of the rework - including
+the launch checklist - in [`docs/plan.md`](./docs/plan.md).
 
 ## Getting started
 
@@ -38,7 +39,7 @@ the state of the rework in [`docs/plan.md`](./docs/plan.md).
      ```bash
      make init         # deps -> .env -> install -> pre-commit -> dev-postgres -> migrate
      make dev-backend  # runserver on the host (:8000)
-     make dev-frontend # vite dev server (:5173)
+     make dev-frontend # vite dev server on http://localhost:5173/ (needs dev-backend)
      ```
 
    `make help` lists every target; [`CLAUDE.md`](./CLAUDE.md) has the detailed reference.
@@ -57,6 +58,9 @@ the state of the rework in [`docs/plan.md`](./docs/plan.md).
    make dev-manage c="seed_testdata --flush"
    ```
 
+5. **Before deploying an nginx change**, validate it: `make nginx-check` renders the site template
+   and runs `nginx -t` in a throwaway container - no image build and no real certificates needed.
+
 ## How it works
 
 1. **Catalog.** Products are template files grouped by country and document type, with a year, a
@@ -67,10 +71,15 @@ the state of the rework in [`docs/plan.md`](./docs/plan.md).
    order, issues download tokens and mails the purchases-page link.
 4. **Delivery.** Two time-limited tokens: one opens the purchases page, one opens a single file.
    Both can be re-issued, and `POST /api/send-links/` mails a fresh page link.
+5. **For crawlers.** Every storefront URL answers twice from one view: a bot gets the Django-rendered
+   page, a person gets the SPA shell with the same meta. `/sitemap.xml` is an index over per-section
+   maps carrying both languages with hreflang, and `/robots.txt` is rendered by Django so its
+   `Sitemap:` line always names the real host.
 
 ## Technology stack
 
-**Frontend:** Vue 3, Pinia, Vue Router, axios, vue-i18n.
+**Frontend:** Vue 3, Pinia, Vue Router, axios, vue-i18n, glightbox. Built by vite straight into
+the backend's static tree (`make spa`), so there is no separate frontend service in production.
 
 **Backend:** Django, Django REST Framework, django-modeltranslation, gunicorn, psycopg,
 PostgreSQL.

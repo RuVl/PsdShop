@@ -6,16 +6,14 @@ from django.conf import settings
 from django.db import models
 from django.db.models import Exists, OuterRef
 from django.http import HttpRequest
-from django.utils import timezone
+from django.urls import reverse
+from django.utils import timezone, translation
 from django.utils.translation import gettext_lazy as _
 
 from backend.sites import absolute_url
 
 if TYPE_CHECKING:
     from sales.models import OrderQuerySet
-
-# Frontend route, not a Django one - keep it in step with the Vue router (`/purchases/:token`).
-PURCHASES_PATH = "/purchases/{token}"
 
 
 class CustomerQuerySet(models.QuerySet):
@@ -109,9 +107,18 @@ class Customer(models.Model):
         return self.access_token_expires_at is not None and timezone.now() <= self.access_token_expires_at
 
     def get_purchases_url(self, request: HttpRequest | None) -> str:
-        """Absolute link to the purchases page - the single link the delivery e-mail carries."""
+        """
+        Absolute link to the purchases page - the single link the delivery e-mail carries.
 
-        return absolute_url(PURCHASES_PATH.format(token=self.access_token), request)
+        The route is served by Django (the SPA shell) under `i18n_patterns`, so the language is a
+        path prefix and has to be the customer's own: the mail is sent from the Plisio webhook,
+        where the only browser involved belongs to Plisio (ADR-0004).
+        """
+
+        with translation.override(self.language):
+            path = reverse("storefront:purchases-token", kwargs={"token": self.access_token})
+
+        return absolute_url(path, request)
 
     def set_language(self, language: str | None):
         """Remember the site language the customer is using, so the next e-mail speaks it."""

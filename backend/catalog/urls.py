@@ -1,12 +1,10 @@
-from django.urls import include, path
-from rest_framework.routers import DefaultRouter
+from django.urls import path
 
-from catalog.views import CountryViewSet, ExchangeRatesView
-
-router = DefaultRouter()
-router.register(r"countries", CountryViewSet, basename="countries")
+from catalog.views import CountryListView, DocumentTypeListView, ProductDetailView, ProductListView
 
 urlpatterns = [
-    path("", include(router.urls)),
-    path("exchange-rates/", ExchangeRatesView.as_view(), name="exchange-rates"),
+    path("catalog/countries/", CountryListView.as_view(), name="catalog-countries"),
+    path("catalog/document-types/", DocumentTypeListView.as_view(), name="catalog-document-types"),
+    path("catalog/products/", ProductListView.as_view(), name="catalog-products"),
+    path("catalog/products/<int:pk>/", ProductDetailView.as_view(), name="catalog-product"),
 ]

@@ -1,6 +1,5 @@
 import {nextTick} from 'vue';
 import {createI18n} from 'vue-i18n';
-import {defaults} from 'lodash';
 
 let i18n;
 const loadedLanguages = new Set();
@@ -9,14 +8,16 @@ export const DEFAULT_LOCALE = 'en';
 export const SUPPORT_LOCALES = ['en', 'ru'];
 
 export async function setupI18n(options = {}) {
-    defaults(options, {
+    const settings = {
         legacy: false,
-        locale: DEFAULT_LOCALE,
-        fallbackLocale: DEFAULT_LOCALE
-    });
+        fallbackLocale: DEFAULT_LOCALE,
+        ...options,
+        // A caller may hand us an empty language (nothing stored yet), so this stays last.
+        locale: options.locale || DEFAULT_LOCALE,
+    };
 
-    i18n = createI18n(options);
-    await setI18nLanguage(options.locale);
+    i18n = createI18n(settings);
+    await setI18nLanguage(settings.locale);
     return i18n;
 }
 

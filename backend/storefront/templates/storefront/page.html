@@ -1,0 +1,13 @@
+{% extends "storefront/base.html" %}
+
+{% block content %}
+<main class="main-content">
+    <section class="mb-60">
+        <div class="container">
+            <h1 class="title-section title black">{{ page.title }}</h1>
+            {# Owner-authored HTML from the admin editor. #}
+            <div class="idesc">{{ page.body|safe }}</div>
+        </div>
+    </section>
+</main>
+{% endblock %}
