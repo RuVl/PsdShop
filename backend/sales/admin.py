@@ -56,7 +56,7 @@ class OrderItemInline(DownloadColumnsMixin, admin.TabularInline):
 
 
 class TransactionInline(admin.TabularInline):
-    """An order can have several invoices - a currency switch mints a new one (ADR-0003)."""
+    """An order can have several invoices - a currency switch mints a new one (docs/architecture.md)."""
 
     model = Transaction
     fields = ["txn_id", "status", "amount", "currency", "source_amount", "commission", "created_at"]

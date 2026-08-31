@@ -157,7 +157,7 @@ class Product(MetaTagsMixin):
     """
     One template on sale: a file plus everything the storefront shows about it.
 
-    Sold any number of times, so it carries no stock (ADR-0001). It cannot be deleted once bought -
+    Sold any number of times, so it carries no stock (docs/architecture.md). It cannot be deleted once bought -
     `OrderItem.product` is PROTECT, and taking it off the shelf is `is_active=False`.
 
     :param name: Product name (translated).

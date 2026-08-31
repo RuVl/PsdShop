@@ -7,7 +7,7 @@ import IconTrash from '@/components/icons/IconTrash.vue';
 import {useCartStore} from '@/stores/cart.js';
 import {useCatalogStore} from '@/stores/catalog.js';
 
-// The cart itself lives in localStorage (ADR-0010) - this page is its view, drawn with the
+// The cart itself lives in localStorage (docs/architecture.md) - this page is its view, drawn with the
 // design's storefront classes. A line is a catalog card payload: no quantities, USD only.
 const route = useRoute();
 const cartStore = useCartStore();

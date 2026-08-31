@@ -79,7 +79,7 @@ class Command(BaseCommand):
                 deleted = Product.objects.all().delete()
             except ProtectedError as error:
                 # A sold product cannot be deleted - `OrderItem.product` is PROTECT, so the file
-                # outlives the sale (ADR-0001). Say that instead of dumping the traceback.
+                # outlives the sale (docs/architecture.md). Say that instead of dumping the traceback.
                 sold = {item.order_id for item in error.protected_objects}
                 raise CommandError(
                     f"Some products have been sold and cannot be deleted (orders: {sorted(sold)}). "

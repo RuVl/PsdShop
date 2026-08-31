@@ -100,7 +100,7 @@ SITE_SCHEME = env("SITE_SCHEME", default="https")
 PURCHASES_PAGE_TTL = timedelta(hours=24)  # Customer.access_token
 DOWNLOAD_TTL = timedelta(hours=24)  # OrderItem.token
 
-# Checkout limit. Nothing is reserved (ADR-0001), but every checkout costs a Plisio invoice, so a
+# Checkout limit. Nothing is reserved (docs/architecture.md), but every checkout costs a Plisio invoice, so a
 # single request must not be able to ask for the whole catalogue.
 MAX_ORDER_ITEMS = 25
 

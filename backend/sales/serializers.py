@@ -13,7 +13,7 @@ class OrderSerializer(serializers.ModelSerializer):
     Order serializer for making an order.
 
     Accepts an e-mail, a list of product ids and the site language; the price is computed here,
-    never taken from the client. There is no quantity - a template is bought once (ADR-0001).
+    never taken from the client. There is no quantity - a template is bought once (docs/architecture.md).
     """
 
     email = serializers.EmailField(write_only=True, validators=[validate_email_domain])

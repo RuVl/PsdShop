@@ -8,7 +8,7 @@ import IconCopy from '@/components/icons/IconCopy.vue';
 import {fetchPurchases, refreshAllPurchaseItems, refreshPurchaseItem} from '@/api/order.js';
 
 // The page the delivery e-mail links to. The token in the URL is the whole authentication
-// (ADR-0002), so a 404 from any call here means the link is spent - the page says so instead of
+// (docs/architecture.md), so a 404 from any call here means the link is spent - the page says so instead of
 // retrying. Every line is one bought file with its own download link and TTL.
 const route = useRoute();
 const token = route.params.token;

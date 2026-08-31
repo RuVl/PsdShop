@@ -144,7 +144,7 @@ class Order(models.Model):
         """
         Hand the files over: every line gets a download token.
 
-        A template never runs out (ADR-0001), so this cannot fail on stock, and repeating it is
+        A template never runs out (docs/architecture.md), so this cannot fail on stock, and repeating it is
         harmless - a line that already holds a live token keeps it, so a second callback does not
         invalidate the link the customer is already using.
         """
@@ -189,7 +189,7 @@ class OrderItem(models.Model):
 
     The snapshot fields answer "what did this cost back then" - the catalog is free to change
     afterwards. There is no quantity: buying the same template twice makes no sense, so a product
-    appears in an order at most once (ADR-0001).
+    appears in an order at most once (docs/architecture.md).
 
     :param order: Order this line belongs to.
     :param product: Product bought; PROTECT, because the file has to outlive the sale.
@@ -272,7 +272,7 @@ class Transaction(models.Model):
     One Plisio invoice of an order.
 
     An order can have several: switching cryptocurrency mints a new invoice with a new txn_id while
-    order_number stays ours, so this is a FK and not a OneToOne (ADR-0003).
+    order_number stays ours, so this is a FK and not a OneToOne (docs/architecture.md).
 
     :param order: Order being paid for.
     :param txn_id: Plisio invoice id.
@@ -281,7 +281,7 @@ class Transaction(models.Model):
     :param pending_amount: What is still missing when the customer underpaid.
     :param tx_urls: Blockchain transactions of this invoice, as sent by Plisio.
     :param source_amount: The fiat side of the invoice, as Plisio reports it.
-    :param source_currency: Currency of `source_amount`; ours is always USD (ADR-0006).
+    :param source_currency: Currency of `source_amount`; ours is always USD (docs/architecture.md).
     :param source_rate: How much of `currency` one unit of `source_currency` buys, so that
         `amount / source_rate` is the fiat value. It divides, it never multiplies - Plisio's own
         example has 0.0104 ETH at a rate of 0.00052 for $20.

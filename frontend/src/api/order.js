@@ -5,9 +5,9 @@ import Product from '@/models/Product.js';
 // the two token pages (purchases, unsubscribe). Errors are deliberately not caught here - the
 // form that started a request is the only place that can tell the customer what happened.
 
-// An order holds a product at most once and there are no quantities (ADR-0001), so the checkout
+// An order holds a product at most once and there are no quantities (docs/architecture.md), so the checkout
 // payload is a list of ids. The language rides along because the delivery e-mail is sent from the
-// payment webhook, long after this browser is gone (ADR-0004).
+// payment webhook, long after this browser is gone (docs/architecture.md).
 export async function createOrder({email, language, products}) {
     const response = await api.post('/order/', {email, language, products});
     return response.data.redirect_url;
@@ -25,7 +25,7 @@ export async function sendPurchasesLinks({email, language}) {
     return (await api.post('/send-links/', {email, language})).data;
 }
 
-// The token in the path is the whole authentication (ADR-0002): a 404 from any of these means the
+// The token in the path is the whole authentication (docs/architecture.md): a 404 from any of these means the
 // link is spent, and the page says so instead of retrying.
 export async function fetchPurchases(token) {
     return (await api.get(`/purchases/${token}/`)).data;

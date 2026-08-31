@@ -949,7 +949,7 @@ class CartItemsTests(SalesFactoryMixin, TestCase):
         self.assertEqual(response.data, [])
 
     def test_both_languages_ride_along(self):
-        """No `?lang=` anywhere in the API (ADR-0010): every visitor gets the same payload."""
+        """No `?lang=` anywhere in the API (docs/architecture.md): every visitor gets the same payload."""
 
         self.product.name_ru = "Счёт за коммуналку"
         self.product.save(update_fields=["name_ru"])

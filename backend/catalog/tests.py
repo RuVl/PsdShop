@@ -241,7 +241,7 @@ class ProductFileTests(CatalogFactoryMixin, TestCase):
 
 
 class ProductAdminTests(CatalogFactoryMixin, TestCase):
-    """The change page renders a field whose storage refuses to build a URL (ADR-0001)."""
+    """The change page renders a field whose storage refuses to build a URL (docs/architecture.md)."""
 
     def setUp(self):
         super().setUp()
@@ -290,7 +290,7 @@ class ProductAdminTests(CatalogFactoryMixin, TestCase):
 
 
 class ProductDeletionTests(CatalogFactoryMixin, TestCase):
-    """A sold template has to stay downloadable, so the catalogue cannot drop it (ADR-0001)."""
+    """A sold template has to stay downloadable, so the catalogue cannot drop it (docs/architecture.md)."""
 
     def test_a_bought_product_cannot_be_deleted(self):
         product = self.make_product()

@@ -18,7 +18,7 @@ urlpatterns = [
     path("order/status", PlisioCallbackView.as_view(), name="plisio-callback"),
     path("send-links/", SendDownloadLinksView.as_view(), name="send-links"),
     path("files/<uuid:uuid>/", DownloadFileView.as_view(), name="download-file"),
-    # Purchases page. The token in the path is the whole authentication, see ADR-0002.
+    # Purchases page. The token in the path is the whole authentication, see docs/architecture.md.
     path("purchases/<uuid:token>/", PurchasesView.as_view(), name="purchases"),
     path(
         "purchases/<uuid:token>/refresh/<int:item_id>/",

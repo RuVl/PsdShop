@@ -5,7 +5,7 @@ import {useSettingsStore} from '@/stores/settings.js';
 import {errorMessageKey} from '@/api/errors.js';
 
 // The page you land on when the link from the e-mail is lost: it tops up anything undelivered,
-// revokes the old purchases link and mails a fresh one (ADR-0002).
+// revokes the old purchases link and mails a fresh one (docs/architecture.md).
 const email = ref('');
 const sending = ref(false);
 const error = ref(null);

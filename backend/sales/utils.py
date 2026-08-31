@@ -18,7 +18,7 @@ def send_purchases_link(request: HttpRequest | None, customer: Customer) -> int:
     download links, so an e-mail cannot go stale the way a list of file links did.
 
     The language comes from the Customer, not from the request: this is also called from the
-    Plisio webhook, where the only browser involved belongs to Plisio (ADR-0004).
+    Plisio webhook, where the only browser involved belongs to Plisio (docs/architecture.md).
     """
 
     with translation.override(customer.language):

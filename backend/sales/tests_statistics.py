@@ -57,7 +57,7 @@ class StatisticsFactoryMixin:
         A paid order. auto_now_add ignores what we pass, so the dates are set afterwards.
 
         `lines` is how many products the order holds - there is no quantity any more, a template
-        is bought once (ADR-0001), so several lines mean several distinct products.
+        is bought once (docs/architecture.md), so several lines mean several distinct products.
         """
 
         order = Order.objects.create(customer=customer or self.customer, total_price=Decimal(price) * lines)

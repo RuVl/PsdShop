@@ -28,7 +28,7 @@ def make_unsubscribe_url(customer: Customer, request: HttpRequest | None = None)
     """
     Absolute link to the unsubscribe page.
 
-    The language is the path prefix (`i18n_patterns`, ADR-0010) and comes from the Customer: the
+    The language is the path prefix (`i18n_patterns`, docs/architecture.md) and comes from the Customer: the
     page is opened from an inbox, with no idea of what the customer picked on the site.
     """
 

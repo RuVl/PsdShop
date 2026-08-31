@@ -14,7 +14,7 @@ class ProductFileInput(AdminFileWidget):
     """
     The admin's file widget, for a file that may have no URL.
 
-    A product file lives on `ProductFilesStorage`, which has no `base_url` on purpose (ADR-0001):
+    A product file lives on `ProductFilesStorage`, which has no `base_url` on purpose (docs/architecture.md):
     the only way to it is `DownloadFileView`, behind a token. The stock widget asks for the URL
     twice - `is_initial()` in python and `<a href="{{ widget.value.url }}">` in the template - and
     both raise ValueError, so the change page answered 500 instead of rendering the form.
@@ -129,7 +129,7 @@ class ProductAdmin(SeoFieldsetMixin, TranslationAdmin):
 
     def delete_model(self, request, obj):
         """
-        A bought product cannot be deleted - its file is what the customer downloads (ADR-0001).
+        A bought product cannot be deleted - its file is what the customer downloads (docs/architecture.md).
 
         Both delete flows already stop before this: the confirmation page collects the related
         rows, finds the PROTECTed `OrderItem`s and refuses to offer the button. This is the net
