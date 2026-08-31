@@ -321,3 +321,34 @@ nginx продублировали бы знание о домене и разъ
 
 **Минусы.** Нельзя «долистать» каталог одним движением; на каждую страницу — запрос (кэширование
 на клиенте, если понадобится, ложится поверх без изменения адресов).
+
+## 2026-08-31 — админка: страница товара падала на поле с файлом
+
+**Задача.** `ValueError: This file is not accessible via a URL.` на
+`/admin/catalog/product/<id>/change/`, `django.contrib.admin.options.change_view`.
+
+**Причина.** `ProductFilesStorage` намеренно без `base_url` (ADR-0001, файл отдаёт только
+`DownloadFileView` по токену), а `AdminFileWidget` спрашивает URL дважды: `is_initial()` в питоне
+(`getattr(value, "url", False)`) и `<a href="{{ widget.value.url }}">` в шаблоне. Оба упираются в
+`FileSystemStorage.url()`, который здесь бросает `ValueError` — страница отдаёт 500.
+
+**Решение.** `catalog/admin.py: ProductFileInput` наследует **`AdminFileWidget`** (а не голый
+`ClearableFileInput`: у админского виджета свой шаблон, класс `file-upload` и `use_fieldset`), даёт
+свой `is_initial()` через `isinstance(value, FieldFile)` и считает `value_url` в питоне. Шаблон
+`catalog/templates/catalog/widgets/product_file_input.html` — копия админского, где ссылка стала
+условной: есть URL — есть `<a>`, нет — только имя файла. Подключено
+`formfield_overrides = {models.FileField: {"widget": ProductFileInput}}`.
+
+**Почему ссылка условная, а не выброшенная.** `ImageField` — подкласс `FileField`, и
+`formfield_overrides` поймает превью, если его когда-нибудь повесят на сам `Product`; безусловный
+«никогда не линковать» тихо сломал бы им ссылку. Проверка идёт по факту (`try: value.url`), а не по
+классу хранилища, — S3-подобные хранилища `base_url` не выставляют.
+
+**Минусы.** Шаблон — копия апстримного за вычетом условия: смена вёрстки виджета в Django пройдёт
+мимо него. Из админки файл по-прежнему никак не скачать — единственный путь к нему
+`DownloadFileView` по токену заказа; staff-скачивание товара, если понадобится, отдельная задача.
+
+**Проверено.** `catalog.tests.ProductAdminTests` — change-страница 200 и печатает имя файла, `</a>`
+после имени нет, add-страница 200, `value_url` возвращает ссылку для превью и `""` для платного
+файла. Рендер виджета сверен с админским глазами (`p.file-upload`, `<br>`, `Change:`). Весь набор —
+284 теста, зелено.

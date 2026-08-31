@@ -17,6 +17,9 @@ class ProductFilesStorage(FileSystemStorage):
     `base_url` stays unset, so `product.file.url` raises instead of handing out a path, and the
     root is read from settings on every access rather than frozen at import - that is what lets a
     test redirect the uploads it makes.
+
+    Anything that renders the field has to cope with that raise: the admin does it in
+    `catalog.admin.ProductFileInput`, whose stock version asks for the URL and 500s.
     """
 
     @property

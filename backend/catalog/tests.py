@@ -1,15 +1,18 @@
 from decimal import Decimal
 from io import BytesIO, StringIO
 
+from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
 from django.core.files.base import ContentFile
 from django.core.management import call_command
 from django.core.management.base import CommandError
 from django.db.models import ProtectedError
 from django.test import TestCase
+from django.urls import reverse
 
 from backend.testing import TempUploadsMixin
 from backend.urlspace import reserved_slugs
+from catalog.admin import ProductFileInput
 from catalog.models import IMAGE_FIELDS, IMAGE_VARIANTS, Country, DocumentType, Product, ProductImage
 from content.models import Page
 from customer.models import Customer
@@ -233,6 +236,55 @@ class ProductFileTests(CatalogFactoryMixin, TestCase):
 
         self.assertFalse(first.exists())
         self.assertTrue((self.private / product.file.name).exists())
+
+
+class ProductAdminTests(CatalogFactoryMixin, TestCase):
+    """The change page renders a field whose storage refuses to build a URL (ADR-0001)."""
+
+    def setUp(self):
+        super().setUp()
+        self.client.force_login(
+            get_user_model().objects.create_superuser(username="staff", email="staff@example.com", password="x")
+        )
+
+    def change_url(self, product: Product) -> str:
+        return reverse("admin:catalog_product_change", args=[product.pk])
+
+    def test_the_change_page_renders_a_product_with_a_file(self):
+        product = self.make_product()
+
+        response = self.client.get(self.change_url(product))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, product.file.name)
+
+    def test_the_page_does_not_link_the_paid_file(self):
+        """A link would be a path into PRODUCT_FILES_ROOT, which nothing serves."""
+
+        product = self.make_product()
+
+        response = self.client.get(self.change_url(product))
+
+        self.assertNotContains(response, f"{product.file.name}</a>")
+
+    def test_the_add_page_renders(self):
+        """No file yet, so the widget takes its other branch."""
+
+        response = self.client.get(reverse("admin:catalog_product_add"))
+
+        self.assertEqual(response.status_code, 200)
+
+    def test_a_file_that_has_a_url_is_still_linked(self):
+        """The widget is not "never link" - it is "link when the storage publishes one"."""
+
+        image = ProductImage.objects.create(product=self.make_product(), image=ContentFile(png_bytes(), name="a.png"))
+
+        self.assertEqual(ProductFileInput.value_url(image.image), image.image.url)
+
+    def test_a_file_without_a_url_reads_as_no_url(self):
+        product = self.make_product()
+
+        self.assertEqual(ProductFileInput.value_url(product.file), "")
 
 
 class ProductDeletionTests(CatalogFactoryMixin, TestCase):
