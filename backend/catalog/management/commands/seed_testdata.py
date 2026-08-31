@@ -52,10 +52,10 @@ PLACEHOLDER_FILE = b"PsdShop test file - not a real template.\n"
 
 # Rough flags for the seed previews - enough to tell one card from another at a glance, drawn as
 # bands (`h` across, `v` down) plus an optional canton. Not a flag library: a country the seed
-# does not list gets its code on plain cloth.
+# does not list gets its code on plain cloth. "gb" is not here - a striped band can't read as the
+# Union Jack, so it gets its own drawing routine (`_draw_union_jack`).
 FLAGS = {
     "us": ("h", [(178, 34, 52), (255, 255, 255)] * 3, (60, 59, 110)),
-    "gb": ("v", [(1, 33, 105), (255, 255, 255), (200, 16, 46), (255, 255, 255), (1, 33, 105)], None),
     "de": ("h", [(0, 0, 0), (221, 0, 0), (255, 206, 0)], None),
     "fr": ("v", [(0, 85, 164), (255, 255, 255), (239, 65, 53)], None),
     "es": ("h", [(198, 11, 30), (255, 196, 0), (198, 11, 30)], None),
@@ -320,19 +320,23 @@ class Command(BaseCommand):
         left = (width - flag_w) // 2
         top = (height - flag_h) // 2 - int(flag_h * 0.25)
 
-        direction, bands, canton = FLAGS.get(product.country.code.lower(), ("h", [(220, 224, 232)], None))
-        for index, colour in enumerate(bands):
-            if direction == "h":
-                y0 = top + flag_h * index // len(bands)
-                y1 = top + flag_h * (index + 1) // len(bands)
-                draw.rectangle((left, y0, left + flag_w, y1), fill=colour)
-            else:
-                x0 = left + flag_w * index // len(bands)
-                x1 = left + flag_w * (index + 1) // len(bands)
-                draw.rectangle((x0, top, x1, top + flag_h), fill=colour)
+        code = product.country.code.lower()
+        if code == "gb":
+            self._draw_union_jack(draw, left, top, flag_w, flag_h)
+        else:
+            direction, bands, canton = FLAGS.get(code, ("h", [(220, 224, 232)], None))
+            for index, colour in enumerate(bands):
+                if direction == "h":
+                    y0 = top + flag_h * index // len(bands)
+                    y1 = top + flag_h * (index + 1) // len(bands)
+                    draw.rectangle((left, y0, left + flag_w, y1), fill=colour)
+                else:
+                    x0 = left + flag_w * index // len(bands)
+                    x1 = left + flag_w * (index + 1) // len(bands)
+                    draw.rectangle((x0, top, x1, top + flag_h), fill=colour)
 
-        if canton:
-            draw.rectangle((left, top, left + flag_w * 2 // 5, top + flag_h * 7 // 13), fill=canton)
+            if canton:
+                draw.rectangle((left, top, left + flag_w * 2 // 5, top + flag_h * 7 // 13), fill=canton)
 
         draw.rectangle((left, top, left + flag_w, top + flag_h), outline=(60, 70, 90), width=max(1, flag_w // 80))
 
@@ -346,6 +350,34 @@ class Command(BaseCommand):
             font=font,
             fill=(214, 32, 48),
         )
+
+    def _draw_union_jack(self, draw, left: int, top: int, width: int, height: int):
+        """Navy field, a white diagonal cross, a white+red centre cross - reads as the Union Jack
+        at thumbnail size, which a plain band never could (see the flag comment above `FLAGS`)."""
+
+        navy, white, red = (1, 33, 105), (255, 255, 255), (200, 16, 46)
+        right, bottom = left + width, top + height
+        center_x, center_y = left + width / 2, top + height / 2
+
+        draw.rectangle((left, top, right, bottom), fill=navy)
+
+        diagonal_white = max(2, int(min(width, height) * 0.22))
+        draw.line((left, top, right, bottom), fill=white, width=diagonal_white)
+        draw.line((right, top, left, bottom), fill=white, width=diagonal_white)
+
+        diagonal_red = max(1, int(min(width, height) * 0.10))
+        draw.line((left, top, right, bottom), fill=red, width=diagonal_red)
+        draw.line((right, top, left, bottom), fill=red, width=diagonal_red)
+
+        cross_white_h = max(3, int(height * 0.34))
+        draw.rectangle((left, center_y - cross_white_h / 2, right, center_y + cross_white_h / 2), fill=white)
+        cross_white_v = max(3, int(width * 0.22))
+        draw.rectangle((center_x - cross_white_v / 2, top, center_x + cross_white_v / 2, bottom), fill=white)
+
+        cross_red_h = max(2, int(height * 0.14))
+        draw.rectangle((left, center_y - cross_red_h / 2, right, center_y + cross_red_h / 2), fill=red)
+        cross_red_v = max(2, int(width * 0.09))
+        draw.rectangle((center_x - cross_red_v / 2, top, center_x + cross_red_v / 2, bottom), fill=red)
 
     def _add_images(self, product: Product, count: int):
         """Generate flat placeholder images so the card, the gallery and the resizer all have work."""

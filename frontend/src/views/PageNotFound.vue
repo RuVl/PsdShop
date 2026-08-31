@@ -2,6 +2,7 @@
 import {computed} from 'vue';
 import {useRoute} from 'vue-router';
 import {useSettingsStore} from '@/stores/settings.js';
+import PageDecor from '@/components/storefront/PageDecor.vue';
 
 // The catch-all route: it also matches addresses with no language prefix, so the way home is the
 // language the visitor is browsing in rather than the one in the (missing) path.
@@ -12,6 +13,8 @@ const lang = computed(() => route.params.lang || settings.currentLanguage || 'en
 </script>
 
 <template>
+  <PageDecor/>
+
   <main class="main-content">
     <section class="shop mb-100">
       <div class="container">

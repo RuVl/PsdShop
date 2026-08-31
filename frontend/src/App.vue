@@ -1,9 +1,9 @@
 <script setup>
-import {computed, onBeforeUnmount, onMounted, ref} from 'vue';
+import {computed, ref} from 'vue';
 import {useRoute} from 'vue-router';
 import LangSwitch from '@/components/storefront/LangSwitch.vue';
 import CartButton from '@/components/storefront/CartButton.vue';
-import PageDecor from '@/components/storefront/PageDecor.vue';
+import {useHeaderScroll} from '@/composables/useHeaderScroll.js';
 import {useContentStore} from '@/stores/content.js';
 
 // The design's shell: header with menu and language flag, the page, footer, floating cart.
@@ -15,8 +15,6 @@ contentStore.load();
 
 const lang = computed(() => route.params.lang || 'en');
 const home = computed(() => ({name: 'home', params: {lang: lang.value}}));
-// The hero lives on the listing pages; everywhere else the dark strip stays bare.
-const showHero = computed(() => ['home', 'catalog'].includes(route.name));
 
 const menuOpen = ref(false);
 
@@ -30,32 +28,9 @@ function closeMenu() {
     document.body.classList.remove('lock');
 }
 
-// The header is `position: fixed` over a light page, so without a background it dissolves into
-// the content as soon as anything scrolls under it. The design solves that in app.js: paint it
-// black past the fold (`header-scrolled`) and slide it away while the reader moves down (`out`).
-const scrolled = ref(false);
-const hidden = ref(false);
-let previousScroll = 0;
-let ticking = false;
-
-function onScroll() {
-    if (ticking) return;
-    ticking = true;
-    requestAnimationFrame(() => {
-        const current = Math.round(window.scrollY);
-        scrolled.value = current > 0;
-        // Never hide the header while the mobile menu is open - it is the menu.
-        hidden.value = !menuOpen.value && current > 100 && current > previousScroll;
-        previousScroll = current;
-        ticking = false;
-    });
-}
-
-onMounted(() => {
-    onScroll();
-    window.addEventListener('scroll', onScroll, {passive: true});
-});
-onBeforeUnmount(() => window.removeEventListener('scroll', onScroll));
+// Painting the fixed header over a light page is the scroll handler's whole job; the menu keeps it
+// on screen while it is open, because the menu is the header.
+const {scrolled, hidden} = useHeaderScroll(() => menuOpen.value);
 </script>
 
 <template>
@@ -86,8 +61,6 @@ onBeforeUnmount(() => window.removeEventListener('scroll', onScroll));
       </div>
     </div>
   </header>
-
-  <PageDecor :show-hero="showHero"/>
 
   <router-view/>
 

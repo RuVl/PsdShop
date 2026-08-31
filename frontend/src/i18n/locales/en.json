@@ -89,6 +89,12 @@
     "unsubscribe": "Unsubscribe"
   },
   "storefront": {
+    "banner": {
+      "label": "Welcome banner",
+      "next": "Next slide",
+      "previous": "Previous slide",
+      "slide": "Slide {number}"
+    },
     "card": {
       "in_cart": "Already in the cart",
       "price": "Price"

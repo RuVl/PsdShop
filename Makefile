@@ -59,6 +59,8 @@ m       ?=
 c       ?=
 FORCE   ?=
 FRONT   ?=
+DEV_HOST ?= 0.0.0.0
+DEV_PORT ?= 8000
 
 .DEFAULT_GOAL := help
 
@@ -185,8 +187,8 @@ dev-migrate: dev-infra ## Миграции локальным backend в dev-Б�
 	$(MANAGE_DEV) migrate
 
 .PHONY: dev-backend
-dev-backend: dev-infra ## Запустить backend локально (runserver 0.0.0.0:8000)
-	$(MANAGE_DEV) runserver 0.0.0.0:8000
+dev-backend: dev-infra ## Запустить backend локально (runserver HOST:PORT; по умолчанию 0.0.0.0:8000)
+	$(MANAGE_DEV) runserver $(DEV_HOST):$(DEV_PORT)
 
 .PHONY: dev-superuser
 dev-superuser: dev-infra ## Создать суперпользователя в dev-БД

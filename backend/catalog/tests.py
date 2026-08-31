@@ -1,5 +1,6 @@
 from decimal import Decimal
 from io import BytesIO, StringIO
+from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
@@ -14,6 +15,7 @@ from backend.testing import TempUploadsMixin
 from backend.urlspace import reserved_slugs
 from catalog.admin import ProductFileInput
 from catalog.models import IMAGE_FIELDS, IMAGE_VARIANTS, Country, DocumentType, Product, ProductImage
+from catalog.views import CatalogPagination
 from content.models import Page
 from customer.models import Customer
 from sales.models import Order, OrderItem
@@ -382,6 +384,21 @@ class CatalogApiTests(CatalogFactoryMixin, TestCase):
         payload = self.client.get("/api/catalog/products/", {"country": "all", "type": "all"}).json()
         self.assertEqual(payload["count"], 1)
 
+    def test_the_grid_payload_says_how_many_pages_there_are(self):
+        """The SPA reads `total_pages` instead of keeping its own copy of the page size."""
+        self.make_product(slug="second")
+        self.make_product(slug="third")
+
+        with patch.object(CatalogPagination, "page_size", 2):
+            payload = self.client.get("/api/catalog/products/").json()
+
+        self.assertEqual(payload["count"], 3)
+        self.assertEqual(payload["total_pages"], 2)
+
+    def test_a_page_past_the_end_is_404(self):
+        """What the grid's overshoot correction rests on: page 2 of a one-page listing is a 404."""
+        self.assertEqual(self.client.get("/api/catalog/products/", {"page": 2}).status_code, 404)
+
     def test_inactive_products_stay_out(self):
         self.make_product(slug="hidden", is_active=False)
         self.assertEqual(self.client.get("/api/catalog/products/").json()["count"], 1)
@@ -464,10 +481,14 @@ class ProductSearchTests(CatalogFactoryMixin, TestCase):
                 slug=f"flood-{index}", name_en=f"Flooded bill {index}", name_ru=f"Затопленный счёт {index}"
             )
 
-        first = self.search("Flooded")
-        self.assertEqual(first["count"], 30)
-        self.assertEqual(len(first["results"]), 24)
+        # A page size of its own: what is asserted here is that the search, not the whole catalog,
+        # is what gets paginated - it must not break the day the shop shows more cards per page.
+        with patch.object(CatalogPagination, "page_size", 24):
+            first = self.search("Flooded")
+            self.assertEqual(first["count"], 30)
+            self.assertEqual(first["total_pages"], 2)
+            self.assertEqual(len(first["results"]), 24)
 
-        second = self.search("Flooded", page=2)
-        self.assertEqual(len(second["results"]), 6)
-        self.assertEqual(self.client.get("/api/catalog/products/", {"q": "Flooded", "page": 3}).status_code, 404)
+            second = self.search("Flooded", page=2)
+            self.assertEqual(len(second["results"]), 6)
+            self.assertEqual(self.client.get("/api/catalog/products/", {"q": "Flooded", "page": 3}).status_code, 404)

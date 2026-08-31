@@ -2,6 +2,7 @@
 import {computed, onMounted, ref} from 'vue';
 import {useRoute} from 'vue-router';
 import {useI18n} from 'vue-i18n';
+import PageDecor from '@/components/storefront/PageDecor.vue';
 import IconDownload from '@/components/icons/IconDownload.vue';
 import IconRefresh from '@/components/icons/IconRefresh.vue';
 import IconCopy from '@/components/icons/IconCopy.vue';
@@ -86,6 +87,8 @@ onMounted(load);
 </script>
 
 <template>
+  <PageDecor/>
+
   <main class="main-content">
     <section class="shop mb-100">
       <div class="container">

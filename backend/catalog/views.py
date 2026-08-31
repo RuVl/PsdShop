@@ -18,11 +18,17 @@ from catalog.serializers import (
 )
 
 # Cards per page, shared with the server-rendered listing (storefront.views).
-PAGE_SIZE = 24
+PAGE_SIZE = 100
 
 
 class CatalogPagination(PageNumberPagination):
     page_size = PAGE_SIZE
+
+    def get_paginated_response(self, data):
+        """Adds `total_pages`, so the SPA never has to keep a copy of the page size to divide by."""
+        response = super().get_paginated_response(data)
+        response.data["total_pages"] = self.page.paginator.num_pages
+        return response
 
 
 class CountryListView(ListAPIView):

@@ -2,6 +2,7 @@
 import {computed, onMounted, ref} from 'vue';
 import {useRoute} from 'vue-router';
 import {storeToRefs} from 'pinia';
+import PageDecor from '@/components/storefront/PageDecor.vue';
 import CheckoutModal from '@/components/storefront/CheckoutModal.vue';
 import IconTrash from '@/components/icons/IconTrash.vue';
 import {useCartStore} from '@/stores/cart.js';
@@ -18,6 +19,8 @@ const {cartItems, cartItemCount, totalPrice} = storeToRefs(cartStore);
 const catalogStore = useCatalogStore();
 catalogStore.load();
 const typeNames = computed(() => Object.fromEntries(catalogStore.documentTypes.map(t => [t.slug, t.name])));
+// The line and its country row side by side: one lookup per line, not one per thing drawn from it.
+const lines = computed(() => cartItems.value.map(item => ({item, country: catalogStore.countryBySlug(item.country)})));
 
 const lang = computed(() => route.params.lang || 'en');
 
@@ -41,6 +44,8 @@ onMounted(async () => {
 </script>
 
 <template>
+  <PageDecor/>
+
   <main class="main-content">
     <section class="shop mb-100">
       <div class="container">
@@ -53,7 +58,7 @@ onMounted(async () => {
           <p v-if="dropped" class="text-small cart__notice">{{ $t('cart_view.dropped') }}</p>
 
           <ul class="cart__list list-reset">
-            <li v-for="item in cartItems" :key="item.id" class="cart__item">
+            <li v-for="{item, country} in lines" :key="item.id" class="cart__item">
               <div class="cart__preview">
                 <img v-if="item.preview?.card" :src="item.preview.card" :alt="item.name">
               </div>
@@ -68,9 +73,9 @@ onMounted(async () => {
                 <!-- The whole row opens the product: this link is stretched over the card by
                      .cart__title::after, and the delete button is lifted above it. -->
                 <router-link class="cart__title text black" :to="item.route(lang)">{{ item.name }}</router-link>
-                <div v-if="catalogStore.countryBySlug(item.country)" class="cart__country text-small">
-                  <span aria-hidden="true">{{ catalogStore.countryBySlug(item.country).flag }}</span>
-                  {{ catalogStore.countryBySlug(item.country).name }}
+                <div v-if="country" class="cart__country text-small">
+                  <span aria-hidden="true">{{ country.flag }}</span>
+                  {{ country.name }}
                 </div>
               </div>
 

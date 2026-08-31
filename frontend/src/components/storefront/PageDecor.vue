@@ -1,38 +1,15 @@
-<script setup>
-// The dark strip under the fixed header, straight from design/index.html: decor + the white
-// wave. Listing pages show the hero inside it; every other page keeps the bare strip so the
-// content clears the header (design/product.html does the same).
-import {useContentStore} from '@/stores/content.js';
-
-defineProps({
-    showHero: {type: Boolean, default: false},
-});
-
-// The design puts a support button under the hero copy; without it the strip ends in a tall
-// empty block on a phone. The address is the owner's own (content.SiteSettings), so the button
-// only appears once they have filled it in - the design's second link (reviews) has no source
-// behind it and is left out rather than faked.
-const contentStore = useContentStore();
-</script>
+<!--
+The dark strip under the fixed header, straight from design/index.html: decor + the white wave.
+Every view renders it as its first element - the header is `position: fixed`, so without the
+strip the content slides underneath. A listing page fills the slot with its hero (HomeHero.vue),
+the way storefront/catalog.html overrides the `hero` block of storefront/base.html; everywhere
+else the strip stays bare, as in design/product.html.
+-->
 
 <template>
   <div class="bgs-header">
-    <section v-if="showHero" class="home" id="home">
-      <div class="container">
-        <div class="home__body">
-          <div class="home__block">
-            <h1 class="home__title title white">{{ $t('storefront.hero.title') }}</h1>
-            <p class="home__text text white">{{ $t('storefront.hero.text') }}</p>
-            <div v-if="contentStore.settings?.support_url" class="home__btns">
-              <a class="btn btn-big btn-grade text white opacity" :href="contentStore.settings.support_url"
-                 target="_blank" rel="noopener">{{ $t('buttons.support') }}</a>
-            </div>
-          </div>
-          <picture class="home__img"><img src="/static/storefront/img/home/home-img.png" alt="Decor"></picture>
-        </div>
-      </div>
-    </section>
-<div class="bgs-header-decor"></div>
+    <slot/>
+    <div class="bgs-header-decor"></div>
     <div class="bgs-header-fly">
         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2999.99 382.84">
             <path fill="#fff" shape-rendering="auto" d="m.07.37C1.77-.73,2.75.93,3.81,1.56c20.41,12.05,37.02,28.25,51.34,46.99,8.5,11.13,15.4,23.29,22.97,35.02,18.44,28.59,41.81,51.78,73.45,65.53,7.91,3.44,16.31,5.55,24.79,7.43,14.56,3.23,29.23,3.64,43.98,2.77,15.67-.93,31.06-3.59,46.37-7.2,21.63-5.1,42.64-12.03,63.44-19.67,17.91-6.57,35.68-13.53,53.6-20.06,20.99-7.65,42.13-15.08,64.19-19.31,9.67-1.86,19.35-3.36,29.25-3.51,34.28-.52,58.88,14.76,74.38,45.1,5.47,10.72,9.46,21.95,12.62,33.58,2.97,10.94,6.95,21.59,11.26,32.1,28.78,70.19,78.18,120.24,147.34,151.05,14.46,6.44,29.35,11.61,44.58,15.99,13.65,3.92,27.53,6.85,41.46,9.22,16.13,2.75,32.57,2.88,48.91,2.11,6.08-.28,12.16.05,18.21-.48,10.19-.9,20.39-1.52,30.56-2.75,7.31-.88,14.65-1.72,22-2.34,11.18-.94,22.25-2.72,33.33-4.32,16.54-2.38,33.08-4.83,49.5-7.91,17.62-3.31,35.26-6.59,52.82-10.23,20.2-4.18,40.42-8.26,60.55-12.79,21.33-4.8,42.62-9.72,63.87-14.9,17.72-4.32,35.5-8.46,53.17-12.97,24.67-6.29,49.3-12.71,73.91-19.24,23.44-6.21,46.81-12.68,70.23-18.95,29.86-7.99,59.68-16.11,89.63-23.75,26.72-6.82,53.58-13.15,80.72-18.1,12.55-2.29,25.11-4.63,37.96-4.78,3.63-.04,7.25.04,10.69.95,4.13,1.1,6.29,4.73,3.76,9.11-2.15,3.72-5.22,6.69-8.36,9.54-14.74,13.38-31.22,24.49-47.22,36.23-17.42,12.78-35.04,25.28-51.06,39.84-6.11,5.56-11.86,11.44-16.6,18.26-2.01,2.89-3.47,6.06-4.67,9.3-1.67,4.5.64,9.99,5.34,13.23,5.91,4.07,12.74,5.62,19.66,6.85,12.18,2.16,24.5,1.86,36.74,1.35,10.97-.46,21.95-.81,32.92-1.82,9.45-.87,18.89-2.06,28.38-2.67,10.27-.67,20.49-2.35,30.71-3.73,8.1-1.09,16.18-2.34,24.25-3.61,10.52-1.66,21.04-3.32,31.55-5.03,12.59-2.05,25.22-3.97,37.77-6.24,27.66-4.99,55.33-9.96,82.9-15.51,14.35-2.89,28.72-5.7,43.09-8.51,18.51-3.61,36.97-7.5,55.44-11.36,20.92-4.37,41.78-8.98,62.73-13.22,14.77-2.99,29.61-5.61,44.45-8.25,17.49-3.12,34.99-6.21,52.52-9.08,16.31-2.68,32.66-5.14,49.02-7.54,11.27-1.65,22.58-3.06,33.87-4.53,11.68-1.52,23.34-3.41,35.07-4.3,7.8-.59,15.63-1.06,23.42-1.75,8.56-.76,17.08-1.94,25.63-2.82,6-.62,12.03-.88,18.02-1.57,10.23-1.18,20.49-2.07,30.68-3.6,8.59-1.29,17.27-1.98,25.89-3.14,11.82-1.59,23.62-3.35,35.43-5.08,8.73-1.28,17.47-2.48,26.17-3.96,19.66-3.35,39.27-6.96,58.81-10.98,23.11-4.75,46.04-10.08,68.63-16.81,25.97-7.73,51.61-16.4,74.86-30.77,5.64-3.48,10.83-7.56,15.83-11.93,9.54-8.32,11.03-18.45,6.99-29.79-3.83-10.77-10.76-19.64-18.2-28.1-16.41-18.65-35.5-34.39-54.7-50.01-16.17-13.16-33-25.52-48.44-39.57-3.14-2.86-6.27-5.77-8.47-9.45-2.18-3.64-1.02-5.62,3.19-5.79,10.69-.43,20.86,2.39,31.01,5.1,7.05,1.88,14.08,3.88,21.08,6,6.89,2.09,13.81,4.11,20.65,6.32,18.27,5.9,36.5,11.9,54.7,18.02,16.31,5.48,32.57,11.09,48.81,16.76,15.59,5.44,31.13,11.03,46.69,16.57,13.22,4.71,26.46,9.38,39.65,14.17,16.61,6.04,33.09,12.45,49.82,18.16,8.34,2.85,16.99,4.81,25.66,6.6,11.2,2.32,22.53,2.71,33.72,1.58,15.65-1.58,29.97-7.39,42.72-16.85,12.57-9.32,22.68-21.03,32.42-33.1,7.92-9.81,15.5-19.91,24.35-28.94,9.48-9.68,20.15-17.41,33.88-19.57,8.03-1.26,16.04-.34,23.87,1.93,0,119.08-.01,238.16.07,357.25,0,2.75-.51,3.49-3.41,3.49-997.73-.08-1995.45-.08-2993.18,0-2.9,0-3.4-.75-3.4-3.49C.08,253.03.07,126.7.07.37Z"/>

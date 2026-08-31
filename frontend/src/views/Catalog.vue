@@ -2,9 +2,11 @@
 import {computed, nextTick, ref, watch} from 'vue';
 import {useRoute, useRouter} from 'vue-router';
 import CountrySidebar from '@/components/storefront/CountrySidebar.vue';
+import HomeHero from '@/components/storefront/HomeHero.vue';
+import PageDecor from '@/components/storefront/PageDecor.vue';
 import Pagination from '@/components/storefront/Pagination.vue';
 import ProductCard from '@/components/storefront/ProductCard.vue';
-import SlidesCarousel from '@/components/storefront/SlidesCarousel.vue';
+import Banner from '@/components/storefront/Banner.vue';
 import IconCross from '@/components/icons/IconCross.vue';
 import IconSearch from '@/components/icons/IconSearch.vue';
 import {fetchProducts} from '@/api/catalog.js';
@@ -38,29 +40,32 @@ watch(isHome, async (home) => {
 const typeNames = computed(() => Object.fromEntries(catalogStore.documentTypes.map(t => [t.slug, t.name])));
 
 // Grid state: loading, failed and empty must never look alike.
-const PAGE_SIZE = 24;
-
 const products = ref([]);
-const count = ref(0);
+const totalPages = ref(1);
 const state = ref('loading');
 const notFound = ref(false);
-const gridTop = ref(null);
+const grid = ref(null);
 
 // One page on screen and that page in the address, the way the bot page has always worked.
 // Infinite scroll used to hold a range of pages here; it cost a scroll anchor, two observers and
 // a guess at the reader's direction, and it left `?page=` describing something other than what
 // was on screen.
-const page = computed(() => Math.max(1, Number(route.query.page) || 1));
-const totalPages = computed(() => Math.max(1, Math.ceil(count.value / PAGE_SIZE)));
+const page = computed(() => {
+    // `?page=` is whatever the address bar carries: a word, a fraction or -3 all mean page one.
+    const number = Number(route.query.page);
+    return Number.isInteger(number) && number > 1 ? number : 1;
+});
 
 // What the grid is showing, as the API takes it. The search rides along with the facets: it is
-// the server that filters, so the count the pagination reads stays honest.
+// the server that filters, so the page count the pagination reads stays honest.
 function facetParams() {
     return {country: countrySlug.value, type: typeSlug.value, q: searchQuery.value};
 }
 
-function gridKey() {
-    return `${route.params.country || 'all'}/${route.params.type || 'all'}/${route.query.q || ''}/${page.value}`;
+// Everything the grid loads from, in one string. A string and not an array: an array getter is a
+// fresh object every run, so the watcher would refire on every route change.
+function gridKey(number = page.value) {
+    return `${countrySlug.value}/${typeSlug.value}/${searchQuery.value}/${number}`;
 }
 
 // The address of a page of this listing: everything else in the query stays, and page 1 carries
@@ -73,81 +78,74 @@ function pageRoute(number) {
     return {query};
 }
 
+// What is already on screen. `load` corrects the address after an overshoot, and that correction
+// arrives back here as a route change: without this the grid would fetch the same page twice.
+let loadedKey = null;
+
+function show(data, number) {
+    products.value = data.results;
+    totalPages.value = data.totalPages;
+    state.value = 'ready';
+    loadedKey = gridKey(number);
+}
+
 async function load() {
+    if (gridKey() === loadedKey) return;
     state.value = 'loading';
     notFound.value = false;
+
     const facet = facetParams();
     const target = page.value;
-
     try {
-        let data;
-        try {
-            data = await fetchProducts({...facet, page: target});
-        } catch (error) {
-            // The API answers 404 both for an unknown country/type slug and for a page past the
-            // end. Asking for the first page tells the two apart: if it answers, the listing
-            // exists and the reader simply overshot - send them to the last real page instead of
-            // a dead end, address included, so a reload shows the same grid.
-            if (error.response?.status !== 404 || target <= 1) throw error;
-
-            data = await fetchProducts({...facet, page: 1});
-            router.replace(pageRoute(Math.max(1, Math.ceil(data.count / PAGE_SIZE))));
-            return;
-        }
-
-        count.value = data.count;
-        products.value = data.results;
-        state.value = 'ready';
+        show(await fetchProducts({...facet, page: target}), target);
         await nextTick();
-        scrollToGrid();
+        scrollToGrid(target);
     } catch (error) {
-        // Still a 404 with the first page asked for: this country or type does not exist.
-        if (error.response?.status === 404) notFound.value = true;
-        else state.value = 'failed';
+        if (error.response?.status !== 404) state.value = 'failed';
+        // A 404 is either an unknown country/type slug or a page past the end of a real listing.
+        else if (target === 1) notFound.value = true;
+        else await landOnLastPage(facet, target);
     }
 }
 
-// Landing on the front page belongs at the top of the document - the hero and the slider are part
-// of it. Every page change after that belongs at the cards, under the fixed header.
-let firstLoad = true;
+// Page 1 tells the two 404s apart: if it answers, the listing exists and the reader simply
+// overshot - show them the last real page, address included, so a reload shows the same grid.
+async function landOnLastPage(facet, target) {
+    let data;
+    try {
+        data = await fetchProducts({...facet, page: 1});
+        if (data.totalPages > 1) data = await fetchProducts({...facet, page: data.totalPages});
+    } catch (error) {
+        if (error.response?.status === 404) notFound.value = true;
+        else state.value = 'failed';
+        return;
+    }
 
-const READER_EVENTS = ['wheel', 'touchstart', 'keydown', 'pointerdown'];
+    const last = Math.max(1, data.totalPages);
+    show(data, last);
+    if (last !== target) router.replace(pageRoute(last));
+    await nextTick();
+    scrollToGrid(last);
+}
 
-function scrollToGrid() {
-    const landing = firstLoad && page.value === 1;
-    firstLoad = false;
-    if (landing || !gridTop.value) return;
+// A page change belongs at the cards, under the fixed header; landing on the page does not - the
+// hero and the banner are part of what the reader came to. A new search stays where it is too:
+// the field sits above the grid, and scrolling would pull it under the header mid-typing.
+let shownPage = null;
 
-    const card = gridTop.value.firstElementChild;
+function scrollToGrid(number) {
+    const previous = shownPage;
+    shownPage = number;
+    if (previous === null || previous === number) return;
+
+    const card = grid.value?.firstElementChild;
     if (!card) return;
 
     // `behavior: "instant"` on purpose: style.css puts `scroll-behavior: smooth` on <html>, and an
     // animated scroll both lands late and dies on the reader's first wheel.
-    const pin = () => {
-        const header = document.querySelector('.header')?.getBoundingClientRect().height ?? 0;
-        const top = Math.max(0, Math.round(window.scrollY + card.getBoundingClientRect().top - header - 16));
-        if (Math.abs(window.scrollY - top) > 1) window.scrollTo({top, behavior: 'instant'});
-    };
-
-    // One scroll is not enough on a cold cache: the hero and the slide above the grid get their
-    // pictures after the first paint and push the cards down again. Hold the card in place for a
-    // moment, and step aside as soon as the reader touches the page.
-    let released = false;
-    const release = () => {
-        released = true;
-        for (const event of READER_EVENTS) window.removeEventListener(event, release);
-    };
-    for (const event of READER_EVENTS) window.addEventListener(event, release, {passive: true});
-
-    const deadline = performance.now() + 1500;
-    const step = () => {
-        if (released || !card.isConnected) return release();
-
-        pin();
-        if (performance.now() < deadline) requestAnimationFrame(step);
-        else release();
-    };
-    step();
+    const header = document.querySelector('.header')?.getBoundingClientRect().height ?? 0;
+    const top = Math.max(0, Math.round(window.scrollY + card.getBoundingClientRect().top - header - 16));
+    window.scrollTo({top, behavior: 'instant'});
 }
 
 watch(() => gridKey(), load, {immediate: true});
@@ -201,8 +199,12 @@ function catalogTarget(country, type) {
 </script>
 
 <template>
+  <PageDecor>
+    <HomeHero/>
+  </PageDecor>
+
   <main class="main-content">
-    <SlidesCarousel v-if="isHome"/>
+    <Banner v-if="isHome"/>
 
     <div v-if="notFound" class="container">
       <p class="text black">{{ $t('storefront.grid.not_found') }}</p>
@@ -265,7 +267,7 @@ function catalogTarget(country, type) {
               <p v-if="state === 'loading'" class="text black">{{ $t('products.loading') }}</p>
               <p v-else-if="state === 'failed'" class="text black">{{ $t('products.error') }}</p>
               <template v-else>
-                <div ref="gridTop" class="products-list">
+                <div ref="grid" class="products-list">
                   <ProductCard v-for="product in products" :key="product.id" :product="product"
                                :type-name="typeNames[product.document_type] || ''"/>
                   <p v-if="!products.length" class="text black">{{ $t('storefront.grid.empty') }}</p>
