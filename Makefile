@@ -9,8 +9,9 @@
 #
 #   2) Локальная разработка (backend/frontend на хосте, только postgres в docker —
 #      см. docker-compose.dev.yaml; нужен из-за rootless-podman и портов 80/443):
-#        make init          — с нуля: deps → .env → install → pre-commit →
-#                              dev-postgres → миграции (НЕ поднимает `up`!)
+#        make init          — с нуля: deps → .env → install → pre-commit.
+#                              Останавливается, чтобы вы заполнили .env файлы.
+#        make dev-migrate   — dev-postgres + миграции (после заполнения .env)
 #        make dev-backend   — runserver на хосте (:8000)
 #        make dev-frontend  — vite dev-сервер (http://localhost:5173/, нужен dev-backend)
 #
@@ -21,7 +22,7 @@
 # (uv / uvx / docker compose / npm). Файловые операции делает Python через
 # `uv run --no-project`, поэтому grep/sed/find не нужны.
 #
-#   make init   — локальная разработка с нуля (сценарий 2)
+#   make init   — локальная разработка с нуля, шаг 1 из 2 (сценарий 2)
 #   make up     — весь стек в docker (сценарий 1)
 #   make help   — полный список целей
 
@@ -71,23 +72,32 @@ help: ## Показать список целей
 # --- Подготовка окружения ---------------------------------------------------
 
 .PHONY: init
-init: ## Подготовить окружение с нуля (deps → .env → install → pre-commit → dev-migrate)
+init: ## Шаг 1 из 2: окружение с нуля (deps → .env → install → pre-commit). Миграции — потом, вручную
 	$(MAKE) check-deps
-	$(MAKE) env
 	$(MAKE) install
 	$(MAKE) pre-commit-install
-	$(MAKE) dev-migrate
-	@echo "OK: dev-postgres поднят, миграции применены. Дальше: make dev-backend (backend :8000) и make dev-frontend (витрина на http://localhost:5173/). Статус dev-postgres: docker compose -f docker-compose.dev.yaml ps"
+	$(MAKE) env
+	@echo ""
+	@echo "Шаг 1 из 2 готов: зависимости установлены, .env файлы созданы из *.dist."
+	@echo "Шаг 2 — ваш: заполните backend/.env, backend/dev.env, frontend/.env, postgres/.env."
+	@echo "  Логин/пароль/имя БД в backend/dev.env ДОЛЖНЫ совпадать с postgres/.env."
+	@echo "Затем: make dev-migrate (поднимет dev-postgres и накатит миграции),"
+	@echo "далее make dev-backend (:8000) и make dev-frontend (http://localhost:5173/)."
 
 .PHONY: check-deps
-check-deps: ## Проверить наличие uv и docker compose
+# uv проверяется первым и своим же вызовом: он — точка входа, все остальные рецепты идут через
+# него, поэтому его отсутствие нечем поймать красиво. npm и docker ищет python (кроссплатформенно,
+# в отличие от `command -v`), чтобы вместо "command not found" на третьей минуте установки было
+# внятное сообщение сразу.
+check-deps: ## Проверить наличие uv, npm и docker compose
 	$(UV) --version
+	@$(UV) run --no-project python -c "import shutil, sys; need={'npm':'https://nodejs.org/en/download','docker':'https://docs.docker.com/engine/install/'}; missing=[(b,u) for b,u in need.items() if shutil.which(b) is None]; [print(f'NOT FOUND: {b} - install it: {u}', file=sys.stderr) for b,u in missing]; sys.exit(1 if missing else 0)"
 	$(COMPOSE) version
 
 .PHONY: env
 env: ## Создать .env из *.dist там, где их нет (backend / frontend / postgres)
 	@$(UV) run --no-project python -c "import os, shutil; [(shutil.copyfile(t+'.dist', t), print('created', t)) for t in ('backend/.env','frontend/.env','frontend/.env.development','postgres/.env','backend/dev.env') if os.path.isfile(t+'.dist') and not os.path.isfile(t)]"
-	@echo "Заполните .env файлы (backend / frontend / postgres) и dev.env для локальной разработки!"
+	@echo "Заполните .env файлы (backend / frontend / postgres) и dev.env для локальной разработки, затем: make dev-migrate"
 
 # --- Установка зависимостей -------------------------------------------------
 
