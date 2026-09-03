@@ -54,12 +54,7 @@ class CustomerAdmin(admin.ModelAdmin):
     ]
     readonly_fields = fields
 
-    def __init__(self, model, admin_site):
-        super().__init__(model, admin_site)
-        self._request = None
-
     def get_queryset(self, request):
-        self._request = request
         return (
             super()
             .get_queryset(request)
@@ -79,9 +74,15 @@ class CustomerAdmin(admin.ModelAdmin):
 
     @admin.display(description="Access url")
     def access_token_url(self, obj: Customer):
-        return format_html(
-            '<a href="{url}">{text}</a>', url=obj.get_purchases_url(self._request), text=obj.access_token
-        )
+        """
+        The customer's own link, relative.
+
+        Relative rather than absolute so it needs no request: a ModelAdmin is a single instance
+        shared by every thread of the process, so a request stashed on it belongs to whoever asked
+        last - see `sales.admin.DownloadColumnsMixin.download_link`, which fixed the same bug.
+        """
+
+        return format_html('<a href="{url}">{text}</a>', url=obj.get_purchases_path(), text=obj.access_token)
 
     def has_add_permission(self, request):
         return False

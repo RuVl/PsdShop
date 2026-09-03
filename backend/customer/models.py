@@ -106,19 +106,25 @@ class Customer(models.Model):
     def is_access_token_valid(self) -> bool:
         return self.access_token_expires_at is not None and timezone.now() <= self.access_token_expires_at
 
-    def get_purchases_url(self, request: HttpRequest | None) -> str:
+    def get_purchases_path(self) -> str:
         """
-        Absolute link to the purchases page - the single link the delivery e-mail carries.
+        The purchases page, relative.
 
         The route is served by Django (the SPA shell) under `i18n_patterns`, so the language is a
         path prefix and has to be the customer's own: the mail is sent from the Plisio webhook,
         where the only browser involved belongs to Plisio (docs/architecture.md).
+
+        Split out from `get_purchases_url` so the admin can render a link with no request at hand -
+        stashing one on the ModelAdmin is the bug `sales.admin.DownloadColumnsMixin` documents.
         """
 
         with translation.override(self.language):
-            path = reverse("storefront:purchases-token", kwargs={"token": self.access_token})
+            return reverse("storefront:purchases-token", kwargs={"token": self.access_token})
 
-        return absolute_url(path, request)
+    def get_purchases_url(self, request: HttpRequest | None) -> str:
+        """Absolute link to the purchases page - the single link the delivery e-mail carries."""
+
+        return absolute_url(self.get_purchases_path(), request)
 
     def set_language(self, language: str | None):
         """Remember the site language the customer is using, so the next e-mail speaks it."""

@@ -9,6 +9,7 @@ a product with no year, an inactive product and a country with nothing in it.
 from decimal import Decimal
 from io import BytesIO
 
+from django.conf import settings
 from django.core.files.base import ContentFile
 from django.core.management.base import BaseCommand, CommandError
 from django.db.models import ProtectedError
@@ -70,11 +71,26 @@ class Command(BaseCommand):
 
     def add_arguments(self, parser):
         parser.add_argument("--flush", action="store_true", help="Wipe the catalog first.")
+        parser.add_argument(
+            "--force",
+            action="store_true",
+            help="Allow --flush outside DEBUG. `make manage` runs in the production container.",
+        )
         parser.add_argument("--images", type=int, default=2, help="Images per product (0 skips them).")
 
     @atomic
     def handle(self, *args, **options):
         if options["flush"]:
+            # --flush drops the countries, document types, pages and slides the owner writes, not
+            # just the generated ones. `make manage` reaches the production container, so outside
+            # DEBUG it takes a second, explicit word. The test runner forces DEBUG=False, which is
+            # why the gate is a flag and not DEBUG alone.
+            if not settings.DEBUG and not options["force"]:
+                raise CommandError(
+                    "--flush deletes every country, document type, page and slide, and DEBUG is "
+                    "off - this looks like a production database. Add --force if you mean it."
+                )
+
             try:
                 deleted = Product.objects.all().delete()
             except ProtectedError as error:

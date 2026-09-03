@@ -273,6 +273,13 @@ class TimeToPayTests(StatisticsFactoryMixin, TestCase):
         self.assertEqual(stats["late"], 1)
         self.assertEqual(stats["late_share"], Decimal(50))
 
+    def test_the_grace_minutes_are_not_late(self):
+        """The window is the from-creation one (1h10m); the shorter constant called this late."""
+
+        self.pay_after(65)
+
+        self.assertEqual(statistics.time_to_pay(self.period)["late"], 0)
+
     def test_the_median_is_rounded_to_whole_seconds(self):
         # PERCENTILE_CONT interpolates between the two middle orders, and half a microsecond of
         # "time to pay" is noise on the page.

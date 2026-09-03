@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: verdoc-backend\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-08-30 11:45+0000\n"
+"POT-Creation-Date: 2026-09-03 15:50+0000\n"
 "PO-Revision-Date: 2026-08-06 15:49+0000\n"
 "Last-Translator: \n"
 "Language-Team: \n"
@@ -98,23 +98,23 @@ msgstr ""
 msgid "Broadcasts"
 msgstr ""
 
-#: mailing/models.py:92
+#: mailing/models.py:116
 msgid "Pending"
 msgstr ""
 
-#: mailing/models.py:93
+#: mailing/models.py:117
 msgid "Sent"
 msgstr ""
 
-#: mailing/models.py:94
+#: mailing/models.py:118
 msgid "Failed"
 msgstr ""
 
-#: mailing/models.py:108
+#: mailing/models.py:132
 msgid "Broadcast delivery"
 msgstr ""
 
-#: mailing/models.py:109
+#: mailing/models.py:133
 msgid "Broadcast deliveries"
 msgstr ""
 
@@ -130,35 +130,35 @@ msgstr ""
 msgid "Delete"
 msgstr ""
 
-#: sales/models.py:112
+#: sales/models.py:118
 msgid "Order"
 msgstr ""
 
-#: sales/models.py:113
+#: sales/models.py:119
 msgid "Orders"
 msgstr ""
 
-#: sales/models.py:222
+#: sales/models.py:228
 msgid "Order item"
 msgstr ""
 
-#: sales/models.py:223
+#: sales/models.py:229
 msgid "Order items"
 msgstr ""
 
-#: sales/models.py:335
+#: sales/models.py:341
 msgid "Transaction"
 msgstr ""
 
-#: sales/models.py:336
+#: sales/models.py:342
 msgid "Transactions"
 msgstr ""
 
-#: sales/models.py:362
+#: sales/models.py:368
 msgid "Payment callback"
 msgstr ""
 
-#: sales/models.py:363
+#: sales/models.py:369
 msgid "Payment callbacks"
 msgstr ""
 
@@ -208,7 +208,7 @@ msgid "Popular"
 msgstr "Популярные"
 
 #: storefront/templates/storefront/_sidebar.html:25
-#: storefront/templates/storefront/catalog.html:64
+#: storefront/templates/storefront/catalog.html:90
 msgid "All categories"
 msgstr "Все категории"
 
@@ -234,31 +234,40 @@ msgstr "Написать в поддержку"
 msgid "Online store of PDF files"
 msgstr "Онлайн-магазин PDF-файлов"
 
-#: storefront/templates/storefront/catalog.html:51
+#: storefront/templates/storefront/catalog.html:59
 msgid "Product list"
 msgstr "Список товаров"
 
-#: storefront/templates/storefront/catalog.html:54
+#: storefront/templates/storefront/catalog.html:62
 msgid "All products"
 msgstr "Все товары"
 
-#: storefront/templates/storefront/catalog.html:59
+#: storefront/templates/storefront/catalog.html:73
+#: storefront/templates/storefront/catalog.html:76
+msgid "Search"
+msgstr "Поиск"
+
+#: storefront/templates/storefront/catalog.html:75
+msgid "Search by name"
+msgstr "Поиск по названию"
+
+#: storefront/templates/storefront/catalog.html:80
 msgid "Filter products"
 msgstr "Фильтр по товарам"
 
-#: storefront/templates/storefront/catalog.html:78
+#: storefront/templates/storefront/catalog.html:104
 msgid "Nothing found for this selection."
 msgstr "По этому запросу ничего не найдено."
 
-#: storefront/templates/storefront/catalog.html:86
+#: storefront/templates/storefront/catalog.html:115
 msgid "Catalog pages"
 msgstr "Страницы каталога"
 
-#: storefront/templates/storefront/catalog.html:90
+#: storefront/templates/storefront/catalog.html:126
 msgid "Previous page"
 msgstr "Предыдущая страница"
 
-#: storefront/templates/storefront/catalog.html:105
+#: storefront/templates/storefront/catalog.html:142
 msgid "Next page"
 msgstr "Следующая страница"
 

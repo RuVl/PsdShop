@@ -41,8 +41,12 @@ def catalog(request, country=None, doctype=None):
     """The home page (no segments) and every filtered listing share this view."""
 
     # `all/all/` is the same set as the bare language root - keep one canonical address for it.
+    # The query string rides along: the sidebar's "all countries" link lands here while a `?q=` is
+    # active, and a redirect that dropped it would silently clear the reader's search.
     if country == "all" and doctype == "all":
-        return redirect("storefront:home", permanent=True)
+        target = reverse("storefront:home")
+        query = request.GET.urlencode()
+        return redirect(f"{target}?{query}" if query else target, permanent=True)
 
     selected_country = get_object_or_404(Country, slug=country) if country and country != "all" else None
     selected_type = get_object_or_404(DocumentType, slug=doctype) if doctype and doctype != "all" else None
@@ -52,7 +56,21 @@ def catalog(request, country=None, doctype=None):
     if not selected_country and not selected_type:
         home_page = Page.objects.filter(is_published=True, slug=Page.HOME).first()
 
-    meta = seo.catalog_meta(request, selected_country, selected_type, home_page)
+    # The listing is built before the branch, not inside the bot one: the canonical has to know how
+    # many pages exist, and both presentations must agree on which products those pages hold. `?q=`
+    # is part of that set - the API applies it too (catalog/views.py), and a bot that sees the
+    # unfiltered facet where a person sees the filtered one is cloaking.
+    query = request.GET.get("q")
+    products = Product.objects.active().for_listing().search(query)
+    if selected_country:
+        products = products.filter(country=selected_country)
+    if selected_type:
+        products = products.filter(document_type=selected_type)
+
+    # Constructing the paginator is free; `num_pages` is what issues the COUNT, and the meta only
+    # asks for it on a paginated address.
+    paginator = Paginator(products, PAGE_SIZE)
+    meta = seo.catalog_meta(request, selected_country, selected_type, home_page, paginator=paginator)
 
     if not is_bot(request) and _shell_available():
         return render_shell(request, meta)
@@ -61,15 +79,10 @@ def catalog(request, country=None, doctype=None):
         # this means the deploy skipped `make spa`.
         logger.warning("SPA shell template missing; serving the server-rendered page to a person")
 
-    products = Product.objects.active().for_listing()
-    if selected_country:
-        products = products.filter(country=selected_country)
-    if selected_type:
-        products = products.filter(document_type=selected_type)
-
-    page = Paginator(products, PAGE_SIZE).get_page(request.GET.get("page"))
+    page = paginator.get_page(request.GET.get("page"))
 
     context = {
+        "query": query or "",
         "storefront_meta": seo.render_meta(meta),
         "products": page,
         "page_obj": page,

@@ -134,6 +134,15 @@ class CustomerAdminFilterTests(TestCase):
     def test_everyone_can_be_listed(self):
         self.assertEqual(self.emails("?purchases=all"), {"buyer@example.com", "lead@example.com"})
 
+    def test_the_access_link_needs_no_request(self):
+        """It is rendered relative: a request stashed on the shared ModelAdmin is the old bug."""
+
+        self.buyer.rotate_access_token()
+
+        response = self.client.get(reverse("admin:customer_customer_change", args=[self.buyer.pk]))
+
+        self.assertContains(response, f'href="{self.buyer.get_purchases_path()}"')
+
     def test_the_order_counts_are_not_skewed_by_the_filter(self):
         Order.objects.create(customer=self.buyer, total_price=10)  # unpaid, on top of the paid one
 

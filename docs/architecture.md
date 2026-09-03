@@ -42,7 +42,9 @@ add up.
 e-mail at checkout - but "everything this person bought" is needed by them (download again) and by
 the shop (broadcasts, LTV, funnel), so the address is a row (unique e-mail, language, subscription)
 that `Order` points at. Two independent tokens, both 24h: `Customer.access_token` opens the
-purchases page and **rotates on every mail that carries it** (that is how old links are revoked),
+purchases page and **rotates when the owner re-sends the link** (`send-links`, which is how old
+links are revoked); the delivery mail deliberately reuses a live one (`ensure_access_token`), so the
+link a customer already has keeps working,
 `OrderItem.token` opens one file. The token is the whole authentication, so an unknown, malformed
 and expired page token all answer the **same 404** - the API must not confirm that a token exists.
 Sharing a link is the customer's right, so the mail says the page shows **all** purchases. The
@@ -168,9 +170,11 @@ Apps: `catalog` (products), `content` (pages, slides, settings), `customer` (buy
    payload omits is left out entirely, so a repeat cannot blank what an earlier message filled) and
    `apply_order_status()` (the one place a status becomes an order state change).
 
-**State transitions live on the models** (`Order.mark_paid/deliver/release/refresh_download_tokens`),
-each `@atomic`. Change those instead of touching row state in a view; they raise `ValueError` on a
-violation, which views turn into 400/409.
+**State transitions live on the models** (`Order.mark_paid` / `Order.deliver`,
+`OrderItemQuerySet.reissue_tokens`, `Broadcast.claim` / `Broadcast.finish`). Change those instead of
+touching row state in a view; the ones that can be called out of turn raise `ValueError`, which
+views turn into 400/409. `mark_paid` and `claim` are single conditional UPDATEs rather than
+read-then-write: they settle a double callback and a second sender by letting one writer win.
 
 **Who counts as a buyer is defined once**: `CustomerQuerySet.buyers()` / `leads()` /
 `subscribed_buyers()`, keyed off `paid_at__isnull=False` through `Exists()` rather than a join, so
@@ -262,7 +266,7 @@ test-mailed to `test_email` (one message per language), then **queued**; cron ru
   reason both get an editor.
 - **Opting out is `Customer.is_subscribed`**, not a suppression table. The footer link goes to the
   SPA route `/unsubscribe/:token` (`django.core.signing`, salt `broadcast-unsubscribe`, language in
-  `?lang=`). The page **asks first**: `GET /api/unsubscribe/<token>/` only reads the token and
+  the path prefix like every other storefront route - there is no `?lang=`). The page **asks first**: `GET /api/unsubscribe/<token>/` only reads the token and
   answers `{email, is_subscribed}`, and `POST` on the same URL is the only thing that unsubscribes.
   Keep that split - Gmail and Outlook pre-fetch every URL in a message.
 

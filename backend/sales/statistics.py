@@ -27,7 +27,10 @@ from sales.models import Order, OrderItem, PaymentCallbackLog, Transaction
 
 # How long an order may take to pay before the invoice it was sent to is dead and the customer
 # has to start over. Taken from the model, not written out again, so the two cannot drift apart.
-INVOICE_WINDOW = Order.INVOICE_FROM_UPDATED
+# `time_to_pay` measures from `created_at`, so this is the from-creation leg of `Order.is_expired`,
+# not the from-updated one - the shorter constant would call the last ten minutes of a live invoice
+# late.
+INVOICE_WINDOW = Order.INVOICE_FROM_CREATED
 
 # The invoices somebody paid. `mismatch` is Plisio's word for a sum that did not match the invoice;
 # we hand the files over for it and stamp paid_at, so its revenue is in `gross` - and its

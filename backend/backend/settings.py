@@ -15,9 +15,12 @@ ALLOWED_HOSTS = env.list("ALLOWED_HOSTS")
 CORS_ALLOWED_ORIGINS = env.list("CORS_ALLOWED_ORIGINS")
 CSRF_TRUSTED_ORIGINS = env.list("CSRF_TRUSTED_ORIGINS")
 
-# Development settings
-if DEBUG:
-    SITE_ID = 1
+# The one site row every absolute URL is built from (backend/sites.py). Pinning it by id rather
+# than resolving by Host is what lets the admin open on a fresh deploy: without it Django looks the
+# site up by the request's host, 500s when no row matches, and the row can only be created in the
+# admin that just refused to open. storefront/migrations guarantees the row exists; its domain is
+# the owner's to set, and a system check complains while it is still the placeholder.
+SITE_ID = 1
 
 # Production settings
 if not DEBUG:

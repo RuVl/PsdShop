@@ -38,12 +38,18 @@ class OrderQuerySet(models.QuerySet):
 
         Handing it back instead of minting a second order is what keeps a double click - or someone
         probing the checkout with the same cart - from filling Plisio with dead invoices.
+
+        Both halves of the filter carry weight. `paid_at` is the paid test, because a late
+        `cancelled duplicate` callback after the `completed` one puts a settled order back at
+        PENDING (`plisio.apply_order_status`) and would otherwise hand its dead invoice to the next
+        checkout. `status` is what excludes the invoices Plisio has already killed - EXPIRED,
+        CANCELLED, ERROR - which `paid_at` alone would let through.
         """
 
         wanted = sorted(product.pk for product in products)
 
         candidates = (
-            self.filter(customer__email=email, status=Order.OrderStatus.PENDING)
+            self.filter(customer__email=email, status=Order.OrderStatus.PENDING, paid_at__isnull=True)
             .exclude(invoice_url="")
             .prefetch_related("items__product")
             .order_by("-created_at")

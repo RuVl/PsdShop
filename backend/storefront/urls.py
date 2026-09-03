@@ -25,9 +25,15 @@ class CountrySegmentConverter(SlugConverter):
 
 
 class ProductSlugConverter(SlugConverter):
-    """`<id>-<slug>`: the leading id resolves the product, the slug is decoration."""
+    """
+    `<id>-<slug>`: the leading id resolves the product, the slug is decoration.
 
-    regex = r"\d+[-a-zA-Z0-9_]*"
+    The hyphen is required in front of the decoration, because the view reads the id as everything
+    up to the first one: a looser pattern matches `12abc`, hands `int()` a word and turns a
+    crawlable address into a 500 rather than a 404.
+    """
+
+    regex = r"\d+(?:-[-a-zA-Z0-9_]*)?"
 
 
 register_converter(CountrySegmentConverter, "country")

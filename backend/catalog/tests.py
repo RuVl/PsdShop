@@ -324,9 +324,17 @@ class ProductDeletionTests(CatalogFactoryMixin, TestCase):
         OrderItem.objects.create(order=order, product=product, product_name=product.name, unit_price=product.price)
 
         with self.assertRaises(CommandError) as caught:
-            call_command("seed_testdata", "--flush", "--images", "0", stdout=StringIO())
+            call_command("seed_testdata", "--flush", "--force", "--images", "0", stdout=StringIO())
 
         self.assertIn(str(order.pk), str(caught.exception))
+
+    def test_flush_refuses_without_force_outside_debug(self):
+        """`make manage` reaches the production container, where --flush would wipe the content."""
+
+        with self.assertRaises(CommandError) as caught:
+            call_command("seed_testdata", "--flush", "--images", "0", stdout=StringIO())
+
+        self.assertIn("--force", str(caught.exception))
 
     def test_taking_a_product_off_the_shelf_is_a_flag(self):
         product = self.make_product()

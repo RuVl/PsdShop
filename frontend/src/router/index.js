@@ -49,9 +49,14 @@ const routes = [
                 meta: {parent: 'home', name: 'routes.unsubscribe'},
             },
             {
-                // `<id>-<slug>`: the id resolves the product, the slug is decoration.
+                // `<id>-<slug>`: the id resolves the product, the slug is decoration. The hyphen
+                // in front of the decoration is required, mirroring ProductSlugConverter in
+                // storefront/urls.py, where a looser pattern hands `12abc` to int() and 500s.
+                // The bare id is an alias rather than an optional group: vue-router counts the
+                // parentheses of a param pattern itself, so `(?:...)` inside one fails to compile.
                 name: 'product',
-                path: ':country/:type/:productSlug(\\d+[-a-zA-Z0-9_]*)/',
+                path: ':country/:type/:productSlug(\\d+-[-a-zA-Z0-9_]*)/',
+                alias: ':country/:type/:productSlug(\\d+)/',
                 component: () => import("@/views/Product.vue"),
             },
             {

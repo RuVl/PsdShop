@@ -1,2 +1,8 @@
-*/15 * * * * /app/.venv/bin/python /app/manage.py broadcast >> /var/log/cron.log 2>&1
-30 4 * * 0 /app/.venv/bin/python /app/manage.py prune_callback_logs >> /var/log/cron.log 2>&1
+# Installed with `crontab` (a user crontab, so no user column). startup.sh writes the environment
+# out to /etc/psdshop-cron.env, because cron strips the one compose passes to the container and
+# settings.py reads os.environ alone. bash rather than the default /bin/sh: the dump is written
+# with `printf %q`, whose quoting is bash's.
+SHELL=/bin/bash
+
+*/15 * * * * . /etc/psdshop-cron.env; /app/.venv/bin/python /app/manage.py broadcast >> /var/log/cron.log 2>&1
+30 4 * * 0 . /etc/psdshop-cron.env; /app/.venv/bin/python /app/manage.py prune_callback_logs >> /var/log/cron.log 2>&1

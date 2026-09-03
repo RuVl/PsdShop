@@ -23,7 +23,8 @@ Add a journal entry in the same commit that closes a fork.
 into the running stack, so bring it up first.
 
 ```bash
-make init          # bootstrap: check-deps → env → install → pre-commit → dev-infra → dev-migrate (NOT `up`)
+make init          # bootstrap step 1: check-deps → install → pre-commit → env, then STOPS.
+                   # Fill the .env files, then run `make dev-migrate` yourself (NOT `up`).
 make env           # create .env from *.dist where missing
 make install       # backend + frontend (install-backend / install-frontend for one)
 make up / down / ps / logs[-backend|-db|-nginx]
@@ -124,8 +125,9 @@ design/       the designer's static build - the source of truth for the look
 - **Never filter orders by `status`** to find paid ones - `STATUS_MAP` turns `cancelled duplicate`
   back into `PENDING`. Use `OrderQuerySet.paid()` / `CustomerQuerySet.buyers()`, the single
   definitions keyed off `paid_at`.
-- **Row state changes go through the model methods** (`Order.mark_paid/deliver/release/
-  refresh_download_tokens`), each `@atomic`; they raise `ValueError`, which views turn into 400/409.
+- **Row state changes go through the model methods** (`Order.mark_paid/deliver`,
+  `OrderItemQuerySet.reissue_tokens`, `Broadcast.claim/finish`); the ones that can be called out of
+  turn raise `ValueError`, which views turn into 400/409.
 - **Money is the `OrderItem` snapshot**, never the current catalog price, and Plisio's commission is
   `commission / source_rate` - dividing, not multiplying.
 - **Links inside e-mails are built with `reverse()` under `translation.override(customer.language)`**

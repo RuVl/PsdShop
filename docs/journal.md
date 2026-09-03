@@ -149,3 +149,42 @@ set `base_url` either.
 
 **Cost.** That template is an upstream copy minus one condition, so a widget markup change in Django
 will pass it by. Any new `FileField` on a private storage inherits this problem.
+
+## 2026-09-03 - `SITE_ID` under `DEBUG` only: the whole site 500s on a fresh deploy
+
+Every page of the first deploy, `/admin/login/` included, answered 500 with
+`Site.DoesNotExist: Site matching query does not exist.` `SITE_ID = 1` was set inside the
+`if DEBUG:` block, so in production `Site.objects.get_current(request)` (`backend/sites.py`, and
+Django's own `get_current_site` in the admin login view) fell back to resolving the site by the
+request's `Host`. Nothing in the database matched that host, and the row could only be created in
+the admin - which was the page refusing to open. `django.contrib.sites` is in `INSTALLED_APPS`, so
+the `RequestSite` fallback Django has for that function never applies.
+
+The same gap killed broadcasts silently: `make_unsubscribe_url` is called from the cron command with
+no request at all, where a missing `SITE_ID` raises `ImproperlyConfigured` instead - once per
+recipient, each one swallowed into a FAILED delivery row.
+
+`SITE_ID = 1` is now unconditional, `storefront/migrations/0001_ensure_site.py` guarantees the row
+exists on an older database, and a `Tags.database` check warns at `migrate` time while the domain is
+still `example.com` - the point being that the placeholder does not 500, it silently mails links to
+example.com.
+
+**Cost.** The domain is still a manual step in the admin; the check is the only thing that shouts
+about it. A test that only ever runs with `DEBUG=True` cannot see any of this - `mailing/tests.py`
+had been creating the site row at pk=1 by hand, which is exactly what hid the bug.
+
+## 2026-09-03 - cron in the backend container had no environment
+
+`backend/cronjob` called `manage.py` directly and `startup.sh` only did `service cron start`. Cron
+strips the environment, the backend's settings come from compose `env_file`, and `settings.py` reads
+`os.environ` alone - so every broadcast run and every callback prune died at import on
+`SECRET_KEY`. Nothing logged it anywhere anybody looked.
+
+`startup.sh` now dumps the environment to `/etc/psdshop-cron.env` (`chmod 600`) and each crontab
+line sources it, which is what `postgres/entrypoint.sh` had already been doing for `backup.sh` since
+the beginning - the pattern existed one directory away. The dump is `compgen -e`, not a named list,
+so a new setting cannot quietly break the sender months later; the crontab sets `SHELL=/bin/bash`
+because `printf %q` quoting is bash's.
+
+**Cost.** Two containers now solve this the same way in two places. If a third ever needs cron,
+extract the dump instead of copying it a third time.
