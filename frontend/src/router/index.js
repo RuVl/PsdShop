@@ -20,33 +20,28 @@ const routes = [
                     default: () => import("@/views/Catalog.vue"),
                     hero: () => import("@/components/storefront/HomeHero.vue"),
                 },
-                meta: {name: 'routes.main'},
             },
             {
                 name: 'cart',
                 path: 'cart/',
                 component: () => import("@/views/Cart.vue"),
-                meta: {parent: 'home', name: 'routes.cart'},
             },
             {
                 name: 'purchases',
                 path: 'purchases/',
                 component: () => import("@/views/MyPurchases.vue"),
-                meta: {parent: 'home', name: 'routes.my_purchases'},
             },
             {
                 // The token is the whole authentication - it arrives by e-mail and expires, see docs/architecture.md.
                 name: 'purchases-list',
                 path: 'purchases/:token/',
                 component: () => import("@/views/Purchases.vue"),
-                meta: {parent: 'home', name: 'routes.my_purchases'},
             },
             {
                 // Reached from an e-mail footer; the token is signed, so the page needs nothing else.
                 name: 'unsubscribe',
                 path: 'unsubscribe/:token/',
                 component: () => import("@/views/Unsubscribe.vue"),
-                meta: {parent: 'home', name: 'routes.unsubscribe'},
             },
             {
                 // `<id>-<slug>`: the id resolves the product, the slug is decoration. The hyphen
@@ -65,6 +60,14 @@ const routes = [
                 name: 'page',
                 path: ':pageSlug([a-z0-9][-a-z0-9_]*)/',
                 component: () => import("@/views/Page.vue"),
+            },
+            {
+                // Django 301s this to the language root (storefront/views.py), so a client-side
+                // navigation has to land on the same address instead of rendering the home
+                // listing under a second, non-canonical one. The query rides along - it may
+                // carry an active `?q=`.
+                path: 'all/all/',
+                redirect: to => ({name: 'home', params: {lang: to.params.lang}, query: to.query}),
             },
             {
                 // `all` means "any" on either segment; the canonical form of all/all is the home page.
@@ -92,6 +95,14 @@ const routes = [
 const router = createRouter({
     history: createWebHistory(),
     routes: routes,
+    // A new page starts at its top; back and forward return to where the reader was. Paging
+    // inside the catalog is the exception - Catalog.vue scrolls to the grid itself, under the
+    // fixed header - so a route that only changed its query is left alone.
+    scrollBehavior(to, from, savedPosition) {
+        if (savedPosition) return savedPosition;
+        if (to.path === from.path) return false;
+        return {top: 0};
+    },
 });
 
 // The path prefix is the single source of the interface language.

@@ -17,7 +17,6 @@ const {cartItems, cartItemCount, totalPrice} = storeToRefs(cartStore);
 // rows, which is where the grid card reads them from too.
 const catalogStore = useCatalogStore();
 catalogStore.load();
-const typeNames = computed(() => Object.fromEntries(catalogStore.documentTypes.map(t => [t.slug, t.name])));
 // The line and its country row side by side: one lookup per line, not one per thing drawn from it.
 const lines = computed(() => cartItems.value.map(item => ({item, country: catalogStore.countryBySlug(item.country)})));
 
@@ -62,8 +61,8 @@ onMounted(async () => {
 
               <div class="cart__body">
                 <div class="cart__badges">
-                  <span v-if="typeNames[item.document_type]" class="badge text-small primary">
-                    {{ typeNames[item.document_type] }}
+                  <span v-if="catalogStore.typeNameBySlug(item.document_type)" class="badge text-small primary">
+                    {{ catalogStore.typeNameBySlug(item.document_type) }}
                   </span>
                   <span v-if="item.year" class="badge-year text-small">{{ item.year }}</span>
                 </div>

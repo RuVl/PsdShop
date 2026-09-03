@@ -54,7 +54,7 @@ class ListingSitemap(StorefrontSitemap):
     def items(self):
         sold = Product.objects.active().values_list("country__slug", "document_type__slug").distinct()
         countries = Country.objects.non_empty().values_list("slug", flat=True)
-        types = DocumentType.objects.with_product_counts().filter(products_count__gt=0)
+        types = DocumentType.objects.non_empty()
 
         # `all` is the wildcard the catalog URLs are built on; all/all is the home page and 301s.
         pairs = [(country, "all") for country in countries]
@@ -96,7 +96,7 @@ class PageSitemap(StorefrontSitemap):
     priority = 0.4
 
     def items(self):
-        return Page.objects.filter(is_published=True).exclude(slug=Page.HOME)
+        return Page.objects.menu()
 
     def lastmod(self, item):
         return item.updated_at

@@ -141,7 +141,10 @@ class Order(models.Model):
             self.paid_at = now
             logger.info(f"Order {self.pk} marked as paid at {now:%Y-%m-%d %H:%M:%S}")
         else:
-            logger.info(f"Order {self.pk} was already paid at {self.paid_at}, not sending a second email")
+            # No timestamp in the message: the loser of the race is holding an instance from
+            # before the winning UPDATE, so `self.paid_at` here is whatever it was loaded with -
+            # usually None, which read as "already paid at None".
+            logger.info(f"Order {self.pk} was already paid, not sending a second email")
 
         return bool(stamped)
 

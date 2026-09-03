@@ -1,4 +1,11 @@
 {% load static i18n %}
+{% comment %}
+    The country list, shared by the listing and the product page. Takes `type_slug` (which
+    document-type filter the links keep) and, on the listing, `query` (the active `?q=`), both
+    passed explicitly by the includer. They used to be read straight out of whatever context the
+    includer happened to have, so a third one would have got a NoReverseMatch with nothing
+    pointing at why.
+{% endcomment %}
                 <div class="shop__left-block">
                     <div class="text black">{% translate "Store categories" %}</div>
                     <div class="categories section">

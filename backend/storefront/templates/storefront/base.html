@@ -23,10 +23,10 @@
                     <li class="menu__item white link-primary"><a href="{% url 'storefront:page' page_slug=nav_page.slug %}">{{ nav_page.title }}</a></li>
                     {% endfor %}
                 </ul>
-                {% include "storefront/_lang_switch.html" %}
+                {% include "storefront/_lang_switch.html" with slot="desktop" %}
             </div>
             <div class="header__mobile">
-                {% include "storefront/_lang_switch.html" %}
+                {% include "storefront/_lang_switch.html" with slot="mobile" %}
                 <button type="button" class="btn-reset burger">
                     <span class="burger-icon"></span>
                 </button>

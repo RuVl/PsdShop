@@ -1,7 +1,6 @@
 {
   "buttons": {
     "add2cart": "Add to cart",
-    "buy": "Buy",
     "buy_now": "Buy now",
     "close": "Close",
     "copied": "Copied",
@@ -71,10 +70,10 @@
       "sent": "The link is on its way. Check the inbox for {email} - and the spam folder."
     },
     "page": {
+      "copy_failed": "The link could not be copied. Select it and copy it by hand.",
       "empty": "No paid purchases here yet.",
       "error": "Could not load your purchases. Check your connection and try again.",
       "expired_link": "This link is no longer valid. Request a new one and it will arrive by e-mail.",
-      "file": "File",
       "file_expired": "The link has expired",
       "loading": "Loading your purchases…",
       "order": "Order #{id} of {date}",
@@ -84,7 +83,6 @@
   },
   "routes": {
     "cart": "Cart",
-    "main": "Main",
     "my_purchases": "My purchases",
     "unsubscribe": "Unsubscribe"
   },
@@ -133,6 +131,7 @@
     "sidebar": {
       "all": "All categories",
       "all_countries": "All countries",
+      "failed": "The category list could not be loaded. Reload the page.",
       "popular": "Popular",
       "title": "Store categories"
     }

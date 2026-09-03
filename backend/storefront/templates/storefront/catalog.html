@@ -53,7 +53,7 @@
     <section class="shop mb-60">
         <div class="container">
             <div class="shop__body">
-                {% include "storefront/_sidebar.html" %}
+                {% include "storefront/_sidebar.html" with type_slug=type_slug query=query %}
 
                 <div class="shop__right-block">
                     <div class="text black">{% translate "Product list" %}</div>

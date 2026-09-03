@@ -398,11 +398,7 @@ def download_rate(period: Period) -> dict:
     order is paid, so "delivered" and "paid" are the same instant now that nothing is reserved.
     """
 
-    delivered = OrderItem.objects.filter(
-        order__paid_at__gte=period.start,
-        order__paid_at__lt=period.end,
-    )
-    stats = delivered.aggregate(
+    stats = sold_items(period).aggregate(
         total=Count("pk"),
         taken=Count("pk", filter=Q(download_count__gt=0)),
         downloads=Coalesce(Sum("download_count"), 0),

@@ -9,12 +9,19 @@ mask the other.
 Findings marked **verified** were re-read against the source after the review. `docs/module-depth.md`
 covers module shape and is not repeated - the reviewers were told to report only what it missed.
 
-**Status, 2026-09-03.** Every **hard** finding below has been fixed, along with the three `make init`
-problems the owner found by hand and the documentation drift. The judgement findings are untouched
-and are what is left to do. Two of the fixes proposed below turned out to be wrong when checked
-against the code and are corrected in place: `reusable()` needs both halves of its filter, and the
-`--flush` guard cannot be `settings.DEBUG` alone. The line numbers for the broadcast and
-`customer/admin.py` findings were wrong in the first draft and have been corrected.
+**Status, 2026-09-03.** Everything below is fixed - the hard findings on both sides, the judgement
+findings, the three `make init` problems the owner found by hand, and the documentation drift. Two
+items were deliberately left as they are, each with the reason written at the code: the front page's
+SEO block still swallows a failed fetch (the block is decorative, and "failed" and "empty" really do
+render the same thing there), and `send-links` still calls `deliver()` per order in a loop (bounded
+by one customer's order count; a queryset-level delivery would change the model API for no reader-
+visible gain).
+
+Four of the fixes proposed below turned out to be wrong when checked against the code and are
+corrected in place: `reusable()` needs both halves of its filter, the `--flush` guard cannot be
+`settings.DEBUG` alone, the canonical clamp belongs in `build_meta`, and vue-router cannot take the
+Django slug pattern verbatim. The line numbers for the broadcast and `customer/admin.py` findings
+were wrong in the first draft and have been corrected.
 
 ## Standards
 

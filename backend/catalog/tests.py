@@ -16,7 +16,7 @@ from backend.urlspace import reserved_slugs
 from catalog.admin import ProductFileInput
 from catalog.models import IMAGE_FIELDS, IMAGE_VARIANTS, Country, DocumentType, Product, ProductImage
 from catalog.views import CatalogPagination
-from content.models import Page
+from content.models import Page, Slide
 from customer.models import Customer
 from sales.models import Order, OrderItem
 
@@ -327,6 +327,19 @@ class ProductDeletionTests(CatalogFactoryMixin, TestCase):
             call_command("seed_testdata", "--flush", "--force", "--images", "0", stdout=StringIO())
 
         self.assertIn(str(order.pk), str(caught.exception))
+
+    def test_seeding_twice_refreshes_the_catalog_instead_of_doubling_it(self):
+        """Re-seeding is how a change to the fixtures is picked up, so it has to be re-runnable."""
+
+        call_command("seed_testdata", "--images", "0", stdout=StringIO())
+        counts = (Product.objects.count(), Country.objects.count(), Page.objects.count(), Slide.objects.count())
+
+        call_command("seed_testdata", "--images", "0", stdout=StringIO())
+
+        self.assertEqual(
+            (Product.objects.count(), Country.objects.count(), Page.objects.count(), Slide.objects.count()),
+            counts,
+        )
 
     def test_flush_refuses_without_force_outside_debug(self):
         """`make manage` reaches the production container, where --flush would wipe the content."""

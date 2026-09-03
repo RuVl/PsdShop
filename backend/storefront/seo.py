@@ -110,11 +110,22 @@ def catalog_meta(request: HttpRequest, country=None, doctype=None, home_page=Non
     return build_meta(request, title=title, description=description, max_page=max_page)
 
 
+def snippet(text: str) -> str:
+    """Body text as a meta description: tags out, thirty words.
+
+    One rule for every page that falls back to its own copy. Only `content.Page.body` is edited
+    through the HTML editor today, but a description with markup in it is a snippet with markup in
+    it, and the next field to get a rich widget should not have to remember this.
+    """
+
+    return Truncator(strip_tags(text or "")).words(30)
+
+
 def product_meta(request: HttpRequest, product) -> dict:
     """Meta for a product page, ld+json Product/Offer and BreadcrumbList included."""
 
     title = product.meta_title or f"{product.name} | {site_name()}"
-    description = product.meta_description or Truncator(product.description).words(30) or ""
+    description = product.meta_description or snippet(product.description)
 
     images = [absolute_url(image.page.url, request) for image in product.images.all() if image.page]
     canonical_path = request.path
@@ -175,7 +186,7 @@ def page_meta(request: HttpRequest, page) -> dict:
     """Meta for an owner-written text page (content.Page)."""
 
     title = page.meta_title or f"{page.title} | {site_name()}"
-    description = page.meta_description or Truncator(strip_tags(page.body)).words(30)
+    description = page.meta_description or snippet(page.body)
     return build_meta(request, title=title, description=description)
 
 
@@ -186,4 +197,6 @@ def service_meta(request: HttpRequest) -> dict:
 
 
 def render_meta(meta: dict) -> str:
-    return mark_safe(render_to_string("storefront/_meta.html", {"meta": meta}))  # noqa: S308
+    # `render_to_string` already hands back a SafeString - the values inside were escaped as the
+    # template rendered them, which is the whole point of rendering them there.
+    return render_to_string("storefront/_meta.html", {"meta": meta})

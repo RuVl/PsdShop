@@ -188,3 +188,19 @@ because `printf %q` quoting is bash's.
 
 **Cost.** Two containers now solve this the same way in two places. If a third ever needs cron,
 extract the dump instead of copying it a third time.
+
+## 2026-09-03 - `style.css` is a copy of the mockup plus thirteen rewritten paths
+
+`CLAUDE.md` says our copy of the designer's stylesheet stays a copy, with `.banner` as the one
+deliberate divergence. It is not quite the whole story, and the missing half is the kind that
+breaks silently: the design serves `style.css` from the same directory as `fonts/` and `img/`,
+while ours lives in `static/storefront/css/`, so every asset URL in it is rewritten one level up
+(`url("fonts/…")` -> `url("../fonts/…")`). Thirteen lines, and the CRLF line endings stripped.
+
+Verified with `diff <(tr -d '\r' < design/style.css) <(tr -d '\r' < backend/storefront/static/storefront/css/style.css)`:
+those rewrites are the *only* difference - no rule, colour or breakpoint of the mockup has been
+touched, which is what the rule is really protecting.
+
+**Cost.** Re-copying an updated `style.css` from the designer without redoing the rewrite loses
+every font and every background image, and nothing fails - the page just renders in a fallback
+font. Run that diff after any re-copy: anything in it other than `url(` lines is an accident.

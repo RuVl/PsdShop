@@ -6,6 +6,7 @@ import IconDownload from '@/components/icons/IconDownload.vue';
 import IconRefresh from '@/components/icons/IconRefresh.vue';
 import IconCopy from '@/components/icons/IconCopy.vue';
 import {fetchPurchases, refreshAllPurchaseItems, refreshPurchaseItem} from '@/api/order.js';
+import {errorMessageKey} from '@/api/errors.js';
 
 // The page the delivery e-mail links to. The token in the URL is the whole authentication
 // (docs/architecture.md), so a 404 from any call here means the link is spent - the page says so instead of
@@ -40,12 +41,19 @@ async function load() {
     }
 }
 
+// What went wrong with the last refresh or copy, as an i18n key. A 404 is not in here: it means
+// the token itself is spent, which takes over the whole page rather than one line of it.
+const actionError = ref(null);
+
 async function withTokenGuard(request) {
+    actionError.value = null;
     try {
         return await request();
     } catch (error) {
+        // A dead backend used to leave the buttons doing nothing at all: the reader pressed
+        // "refresh link", nothing moved, and the reason went to a console they never open.
         if (error.response?.status === 404) state.value = 'gone';
-        else console.error('Purchases page request failed:', error);
+        else actionError.value = errorMessageKey(error);
         return null;
     }
 }
@@ -63,14 +71,17 @@ async function refreshAll() {
 async function copyLink(item) {
     if (!item.download_url) return;
 
+    actionError.value = null;
     try {
         await navigator.clipboard.writeText(item.download_url);
         copied.value = item.id;
         setTimeout(() => {
             if (copied.value === item.id) copied.value = null;
         }, 2000);
-    } catch (error) {
-        console.error('Error copying the link:', error);
+    } catch {
+        // Clipboard access is refused outside a secure context and by permission - the link is
+        // on screen either way, so say so instead of leaving the button looking broken.
+        actionError.value = 'purchases.page.copy_failed';
     }
 }
 
@@ -110,6 +121,8 @@ onMounted(load);
             <span class="text black">{{ email }}</span>
             <button class="button" type="button" @click="refreshAll">{{ $t('buttons.refresh_all_links') }}</button>
           </div>
+
+          <p v-if="actionError" class="text-small purchases__error" role="alert">{{ $t(actionError) }}</p>
 
           <div v-for="order in orders" :key="order.id" class="purchases__order">
             <div class="text-small purchases__order-title">
@@ -170,6 +183,13 @@ onMounted(load);
 }
 
 .purchases__warning {
+  margin: 0 0 20px;
+  font-weight: 600;
+  color: #f6294b;
+}
+
+/* Sits under the refresh buttons, which is where the reader is looking when one fails. */
+.purchases__error {
   margin: 0 0 20px;
   font-weight: 600;
   color: #f6294b;

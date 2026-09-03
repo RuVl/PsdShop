@@ -107,7 +107,8 @@ class OrderCreateView(APIView):
 
         # Plisio puts its own diagnosis in data.{message,code}; pass it on so the storefront can say
         # more than "something went wrong", and log the raw answer for us.
-        error = payload.get("data") if isinstance(payload.get("data"), dict) else {}
+        data = payload.get("data")
+        error = data if isinstance(data, dict) else {}
         http_status = response.status_code if response is not None else None
         logger.error(f"Invoice not created for order {order.id}: HTTP {http_status}, payload {payload}")
 

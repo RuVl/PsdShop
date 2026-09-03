@@ -8,8 +8,13 @@ import Product from '@/models/Product.js';
 // An order holds a product at most once and there are no quantities (docs/architecture.md), so the checkout
 // payload is a list of ids. The language rides along because the delivery e-mail is sent from the
 // payment webhook, long after this browser is gone (docs/architecture.md).
+// The checkout waits longer than anything else here: the view calls Plisio with a 30s timeout of
+// its own (sales/views.py), so the client's default 10s would abort a request the server is still
+// finishing and tell the customer the network failed for an order that was in fact created.
+export const CHECKOUT_TIMEOUT_MS = 40000;
+
 export async function createOrder({email, language, products}) {
-    const response = await api.post('/order/', {email, language, products});
+    const response = await api.post('/order/', {email, language, products}, {timeout: CHECKOUT_TIMEOUT_MS});
     return response.data.redirect_url;
 }
 

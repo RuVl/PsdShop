@@ -54,7 +54,7 @@ def catalog(request, country=None, doctype=None):
     # The front page alone carries the welcome slider and the owner-written SEO block.
     home_page = None
     if not selected_country and not selected_type:
-        home_page = Page.objects.filter(is_published=True, slug=Page.HOME).first()
+        home_page = Page.objects.published().filter(slug=Page.HOME).first()
 
     # The listing is built before the branch, not inside the bot one: the canonical has to know how
     # many pages exist, and both presentations must agree on which products those pages hold. `?q=`
@@ -81,6 +81,10 @@ def catalog(request, country=None, doctype=None):
 
     page = paginator.get_page(request.GET.get("page"))
 
+    # Evaluated once and split in Python: each `non_empty()` is a COUNT-annotated scan over every
+    # product, and the popular block is a handful of rows out of the list the sidebar already has.
+    countries = list(Country.objects.non_empty())
+
     context = {
         "query": query or "",
         "storefront_meta": seo.render_meta(meta),
@@ -91,13 +95,14 @@ def catalog(request, country=None, doctype=None):
         # A list, not the generator the paginator hands back: a template that walks it twice would
         # find it empty the second time.
         "page_range": list(page.paginator.get_elided_page_range(page.number, on_each_side=1, on_ends=1)),
-        "countries": Country.objects.non_empty(),
-        "popular_countries": Country.objects.non_empty().filter(is_popular=True),
-        "document_types": DocumentType.objects.with_product_counts().filter(products_count__gt=0),
+        "countries": countries,
+        "popular_countries": [country for country in countries if country.is_popular],
+        "document_types": DocumentType.objects.non_empty(),
         "selected_country": selected_country,
         "selected_type": selected_type,
         "home_page": home_page,
-        "slides": Slide.objects.visible() if home_page or (not selected_country and not selected_type) else None,
+        # The slider belongs to the front page, which is the one listing with no facet selected.
+        "slides": Slide.objects.visible() if not selected_country and not selected_type else None,
     }
     return render(request, "storefront/catalog.html", context)
 
@@ -105,7 +110,7 @@ def catalog(request, country=None, doctype=None):
 def page(request, page_slug=""):
     """An owner-written text page (content.Page): /en/<slug>/."""
 
-    item = get_object_or_404(Page.objects.filter(is_published=True).exclude(slug=Page.HOME), slug=page_slug)
+    item = get_object_or_404(Page.objects.menu(), slug=page_slug)
 
     meta = seo.page_meta(request, item)
     if not is_bot(request) and _shell_available():
