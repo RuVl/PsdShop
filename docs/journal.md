@@ -204,3 +204,24 @@ touched, which is what the rule is really protecting.
 **Cost.** Re-copying an updated `style.css` from the designer without redoing the rewrite loses
 every font and every background image, and nothing fails - the page just renders in a fallback
 font. Run that diff after any re-copy: anything in it other than `url(` lines is an accident.
+
+## 2026-09-03 - Django stamped the machine hostname into every outgoing e-mail
+
+The first live SendPulse test arrived with `standard-intel-de-1-v-2-7005287-516006-main` in the
+body, which is only the text of Django's own `sendtestemail`. The leak underneath it is not:
+`django/core/mail/utils.py` caches `socket.getfqdn()` in `DNS_NAME`, and two call sites use it on
+*every* message - `message.py` builds `Message-ID: <...@that-hostname>` and the SMTP backend hands
+it to the relay as the EHLO name, which SendPulse then writes into a `Received:` header. Both
+travel to the recipient in the raw source.
+
+Beyond the ugliness, a `Message-ID` whose domain does not match `From:` is a spam signal, and in
+production the name would have been the container id - different on every rebuild.
+
+`settings.py` now pins `DNS_NAME._fqdn` to `EMAIL_FQDN`, which defaults to the domain of
+`DEFAULT_FROM_EMAIL`, so the two cannot drift apart without someone setting the override on
+purpose. `docker-compose.yaml` also names the backend container, but that is for logs only - it is
+not what protects the header.
+
+**Cost.** The default is only as good as `DEFAULT_FROM_EMAIL`: left at the `.env.dist` placeholder
+it stamps `example.com`, which is worse than a hostname. Check the header itself after any change
+to the sender address - Gmail, "Show original", the `Message-ID` line.

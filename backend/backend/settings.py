@@ -2,6 +2,7 @@ from datetime import timedelta
 from pathlib import Path
 
 import environ
+from django.core.mail.utils import DNS_NAME
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -248,6 +249,11 @@ EMAIL_HOST = EMAIL_CONFIG.get("EMAIL_HOST")
 EMAIL_PORT = EMAIL_CONFIG.get("EMAIL_PORT")
 
 DEFAULT_FROM_EMAIL = env.get_value("DEFAULT_FROM_EMAIL", default=EMAIL_HOST_USER)
+
+# Django stamps Message-ID and the SMTP EHLO greeting with socket.getfqdn(), which leaks the
+# machine or container hostname into every delivered message. Pin it to the sender domain.
+EMAIL_FQDN = env.get_value("EMAIL_FQDN", default=(DEFAULT_FROM_EMAIL or "").rpartition("@")[2] or "localhost")
+DNS_NAME._fqdn = EMAIL_FQDN
 
 EMAIL_BACKEND = EMAIL_CONFIG.get("EMAIL_BACKEND")
 EMAIL_USE_TLS = EMAIL_CONFIG.get("EMAIL_USE_TLS", False)
