@@ -22,6 +22,9 @@
                     {% for nav_page in nav_pages %}
                     <li class="menu__item white link-primary"><a href="{% url 'storefront:page' page_slug=nav_page.slug %}">{{ nav_page.title }}</a></li>
                     {% endfor %}
+                    {# Same entry the SPA header carries (App.vue): without it the purchases page #}
+                    {# is reachable only from the delivery e-mail. #}
+                    <li class="menu__item white link-primary"><a href="{% url 'storefront:purchases' %}">{% translate "My purchases" %}</a></li>
                 </ul>
                 {% include "storefront/_lang_switch.html" with slot="desktop" %}
             </div>
@@ -62,6 +65,7 @@
                         {% for nav_page in nav_pages %}
                         <li class="footer__item text black link-primary"><a href="{% url 'storefront:page' page_slug=nav_page.slug %}">{{ nav_page.title }}</a></li>
                         {% endfor %}
+                        <li class="footer__item text black link-primary"><a href="{% url 'storefront:purchases' %}">{% translate "My purchases" %}</a></li>
                     </ul>
                 </div>
             </div>
