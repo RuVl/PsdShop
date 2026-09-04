@@ -1,7 +1,7 @@
 <script setup>
 import {computed, ref} from 'vue';
-import {useRoute} from 'vue-router';
 import {useCatalogStore} from '@/stores/catalog.js';
+import {useCatalogLinks} from '@/composables/useCatalogLinks.js';
 
 // The "store categories" sidebar per design/index.html - shared by the listing and the
 // product page. Links keep the current document-type filter.
@@ -10,10 +10,9 @@ const props = defineProps({
     typeSlug: {type: String, default: 'all'},
 });
 
-const route = useRoute();
 const catalogStore = useCatalogStore();
+const {catalogTarget} = useCatalogLinks();
 
-const lang = computed(() => route.params.lang || 'en');
 const countryQuery = ref('');
 
 const visibleCountries = computed(() => {
@@ -29,10 +28,7 @@ const totalProducts = computed(() =>
 );
 
 function target(country) {
-    // The product search is carried over: picking a country narrows the same search.
-    const query = route.query.q ? {q: route.query.q} : {};
-    if (country === 'all' && props.typeSlug === 'all') return {name: 'home', params: {lang: lang.value}, query};
-    return {name: 'catalog', params: {lang: lang.value, country, type: props.typeSlug}, query};
+    return catalogTarget(country, props.typeSlug);
 }
 </script>
 
@@ -40,6 +36,9 @@ function target(country) {
   <div class="shop__left-block">
     <div class="text black">{{ $t('storefront.sidebar.title') }}</div>
     <div class="categories section">
+      <!-- Without this a dead facets endpoint looks exactly like an empty shop: the list renders
+           blank, the chips vanish and the heading says "all products" over a filtered address. -->
+      <p v-if="catalogStore.failed" class="text-small black">{{ $t('storefront.sidebar.failed') }}</p>
       <div v-if="catalogStore.popularCountries.length" class="categories__popular">
         <div class="categories__title">
           <picture class="categories__icon">

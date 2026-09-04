@@ -1,441 +1,227 @@
-# Журнал решений
-
-Короткие записи о том, как решались нетривиальные задачи: что решали, чем решили, почему так, чем
-за это платим. Новая запись сверху. Крупные развилки, которые задают правила всему проекту,
-по-прежнему оформляются как ADR в [`adr/`](./adr/) — сюда попадает всё остальное.
-
-## 2026-08-29 — правки витрины: модели, пагинация в обе стороны, шапка
-
-**Задача.** Список правок от заказчика (девять по витрине, четыре вопроса по устройству Vue) и
-проверка всего этого скриншотами.
-
-**Что оказалось не тем, чем выглядело.** Кнопка «Показать ещё» уже была — просто служила ещё и
-целью IntersectionObserver, и при автоподгрузке её никто не замечал; теперь наблюдатель следит за
-отдельной невидимой строкой ниже, а кнопка осталась кнопкой. `seed_testdata` уже создавал страницы,
-слайды и настройки с M2b. Стрелки карусели не «поехали»: `style.css` только красит их (размер, фон,
-`top`), а `position: absolute`, `z-index` и сам шеврон давал `swiper-bundle.css`, который мы не
-переносили — дописали в компонент, плюс точки-индикаторы.
-
-**Модели вернулись, но другие.** Старый `Product` был Verdoc-овским: цена `{amount, currency}` из
-`djmoney`, `quantity`/`max_quantity` из стока, конвертация валют. Новый — только то, что нужно
-сейчас: локализованные поля через базовый `Localized`, `priceLabel` и `route(lang)`. api-слой
-конструирует модели, `composables/localized.js` удалён.
-
-**Единственная тонкость — корзина.** `pinia-plugin-persistedstate` пишет в localStorage JSON, и
-после гидрации строки приезжают обычными объектами: геттеры класса (`item.name`) не работают, пока
-их не заменит первый `refresh()`. Лечится хуком `afterHydrate`, который пересобирает строки в
-`Product`.
-
-**Пагинация теперь двусторонняя.** Сетка держит диапазон страниц, а не одну. При `?page=5`
-подгружается пятая, а сверху появляется блок «Загрузить предыдущие» — он же второй наблюдатель,
-поэтому при прокрутке вверх предыдущие подтягиваются сами; перед вставкой запоминается
-`scrollHeight`, чтобы страница не прыгала. `?page=999` больше не даёт «страница не найдена»:
-API отвечает 404 и на промах по номеру, и на неизвестный слаг, поэтому мы спрашиваем первую
-страницу — если она есть, значит человек просто промахнулся мимо конца, и его сажают на последнюю.
-
-**Мелочи, которые нашлись скриншотами, а не чтением кода.** Разные пропорции картинок в seed сразу
-показали, что превью в корзине не обрезаются: A4-портрет растягивал строку втрое. Кнопка на слайде
-упиралась в нижний край (в макете кнопок на слайдах нет). Флаги языков имели одинаковый бокс, но
-разные `viewBox`, и британский выходил уже — вылечено `preserveAspectRatio="slice"`. Иконка поиска
-стояла по центру обёртки, а не инпута, у которого свой `margin-top: 16px`. И собранный SPA сначала
-показался сломанным на `:8000` — оказалось, Django держит `shell.html` в кэше шаблонов, и после
-`make spa` бэкенд надо перезапустить.
-
-## 2026-08-29 — подпись колбэка: `?json=true` обязателен, и порядок ключей не наш
-
-**Задача.** Ответить на вопрос владельца: заработает ли Plisio без `?json=true` в callback-URL.
-
-**Ответ — нет, и по двум причинам сразу.**
-
-1. **Форма и JSON подписываются по-разному.** Без `?json=true` Plisio шлёт
-   `application/x-www-form-urlencoded` и считает `verify_hash` от PHP-`serialize()` отсортированного
-   массива. Наш `validate_hash` считает HMAC от JSON-строки, то есть форменный колбэк не пройдёт
-   проверку никогда — сколько бы мы ни чинили разбор `QueryDict`.
-2. **Даже в JSON-режиме мы расходились с Plisio.** Официальный
-   [plisio-python](https://github.com/Plisio/plisio-python) хеширует тело **в порядке получения** и
-   с `ensure_ascii=True`, а у нас стояло `sort_keys=True, ensure_ascii=False`. Совпало бы только
-   если Plisio присылает ключи по алфавиту и без не-ASCII.
-
-**Почему тесты этого не видели.** Тест подписывал payload той же функцией, которой проверял, —
-проверялась внутренняя согласованность, а не контракт с Plisio. Новый тест подписывает так, как
-подписывает SDK: ключи не по алфавиту, значение с кириллицей. На старом коде он падал (422).
-
-**Решение.** `validate_hash` принимает оба прочтения тела (как получено и с сортировкой ключей) —
-каждое всё равно HMAC нашим ключом, так что подделать ничего нельзя, а лотерея с порядком ключей
-исчезает. И `callback_url` с `?json=true` теперь уезжает с каждым инвойсом
-(`sales/views.py: callback_url()`), а не берётся из настроек кабинета: параметр, от которого
-зависит приём всех платежей, не должен держаться на памяти человека.
-
-**Минус.** В dev `callback_url` собирается от строки `django_site` (`localhost:8000`), куда Plisio
-не достучится — локально платежи по-прежнему проверяются поддельным подписанным колбэком.
-
-## 2026-08-29 — колбэк Plisio не проходил проверку подписи в проде
-
-**Задача.** Предрелизный прогон: послать боевой по форме колбэк на живой сервер.
-
-**Что нашлось.** Plisio постит `application/x-www-form-urlencoded`, значит `request.data` — это
-`QueryDict`, а `QueryDict.copy()` остаётся `QueryDict`. Его `pop()` возвращает **список**, а не
-строку, и `dict()` тоже разворачивает значения в списки. В итоге подпись сравнивалась со списком
-(`"abc" == ["abc"]` — всегда False), то есть **ни один настоящий колбэк не проходил проверку**, а в
-`PaymentCallbackLog` легли бы списки вместо значений.
-
-**Почему тесты молчали.** Все тесты колбэка постят `format="json"` — там `request.data` обычный
-`dict`, и всё работает. Проверялась форма данных, которой в проде не бывает.
-
-**Решение.** Один раз в начале вьюхи: `request.data.dict()` для `QueryDict`, `dict(...)` иначе —
-дальше всё работает со строками. Плюс тест, который постит колбэк формой, как это делает Plisio.
-
-**Урок.** Тест, который сам выбирает удобный формат запроса, проверяет себя, а не интеграцию. Для
-внешних вебхуков форма запроса — часть контракта, и она должна быть в тесте.
-
-## 2026-08-29 — чистка хвостов Verdoc и обвязки (M5)
-
-**Задача.** Убрать всё, что осталось от Verdoc и уже никем не читается, и привести сборку к тому,
-чем проект стал.
-
-**Решение и почему так:**
-
-- **Шрифты из одного источника.** `main.css` тянул Montserrat с Google Fonts, хотя макет отдаёт те
-  же три начертания локально (`@font-face` в `style.css`). Два источника — это внешний запрос на
-  каждой странице SPA и разный рендер у бот-страницы и у SPA.
-- **`package-lock.json` теперь в репозитории**, образ ставит `npm ci`. Бэкенд фиксировал версии
-  в `uv.lock`, фронт не фиксировал ничего: образ, собранный через полгода, приезжал с другими
-  минорными версиями.
-- **`frontend/nginx/ssl/` стала отслеживаемой пустой папкой.** `frontend/Dockerfile` копирует её,
-  так что на чистом клоне без неё `make up` падал на этапе сборки образа.
-- **`make nginx-check`** гоняет `nginx -t` в стоковом образе nginx с примонтированным
-  `frontend/nginx`: не нужен ни наш образ, ни настоящие сертификаты. Upstream `backend` резолвится
-  только внутри compose-сети, поэтому в проверке он подменяется через `--add-host`.
-- **`VITE_API_URL` убран** из `frontend/.env.dist` и из `ARG` образа: прод-сборка всегда
-  same-origin `/api` (это зашито в `vite.config.js`), а живой тумблер, который ни на что не влияет,
-  хуже отсутствующего.
-
-**Минусы.** Отслеживаемый lock-файл придётся обновлять осознанно (`npm install` меняет его в
-коммите); `make nginx-check` тянет стоковый образ nginx при первом запуске.
-
-## 2026-08-29 — аудит безопасности перед боевым запуском
-
-**Задача.** Пройти по всему, что смотрит наружу, до первого реального покупателя.
-
-**Что исправлено сразу:**
-
-- **Сравнение HMAC колбэка было `==`** (`sales/views.py: PlisioCallbackView.validate_hash`).
-  Значение подконтрольно отправителю, поэтому побайтовое сравнение с ранним выходом — канал
-  утечки. Теперь `hmac.compare_digest`.
-- **Ключ Plisio мог попасть в лог.** `api_key` уезжает в query-строке запроса, а `requests`
-  кладёт полный URL в текст исключения, которое мы писали в лог как есть. Добавлен `redact()`
-  и тест, который роняет сборку, если ключ снова окажется в записи лога.
-- **Форма входа в админку не была ограничена.** Django не блокирует аккаунт после неудачных
-  попыток, поэтому перебор пароля упирался только в скорость сети. Добавлена зона
-  `adminlogin` (10 r/m, burst 5) на `location = /admin/login/`.
-- **Browsable API DRF работал в проде** — записываемая HTML-форма на каждой ручке. Теперь
-  JSON-рендерер, browsable только под `DEBUG`.
-
-**Что проверено и оставлено как есть (с обоснованием):**
-
-- **Токены.** UUID4, TTL 24 часа у обоих; страница покупок отвечает одинаковым 404 на неизвестный,
-  испорченный и истёкший токен, а `refresh` скоупится по покупателю (`of_customer`). Перебор
-  бессмысленен, подтверждения существования токена нет.
-- **Колбэк без аутентификации** — так работает Plisio: подпись вместо сессии. Тело запроса ни на
-  что не влияет, кроме как через `callback_to_fields` и `apply_order_status`.
-- **Чекаут без CSRF.** `APIView` в DRF csrf_exempt, а покупатель анонимен — защищать нечего, кроме
-  расхода: это закрывают `limit_req` на `/api/order/`, `MAX_ORDER_ITEMS` и проверка MX.
-- **`/api/send-links/` подтверждает, что на адресе есть покупки** (404 против 200). Это сознательный
-  размен: без него форма восстановления не может сказать человеку, что он ошибся адресом. Ограничено
-  5 r/m.
-- **Платные файлы** лежат вне `MEDIA_ROOT`, ни один `location` на них не смотрит, отдаёт только
-  `DownloadFileView` по токену.
-- **Заголовки:** HSTS, nosniff, `X-Frame-Options: DENY`, `Referrer-Policy: same-origin` — на месте
-  (первый в nginx, остальные штатным `SecurityMiddleware`).
-
-**Что осталось риском и требует решения владельца:**
-
-1. **Токены видны в логах доступа.** `/<lang>/purchases/<token>/` и `/api/files/<uuid>/` пишутся
-   целиком в access-логи nginx и gunicorn, то есть живая ссылка лежит в логе все 24 часа её жизни.
-   Лечится либо доступом к логам, либо вырезанием токена из `access_log_format` — второе стоит
-   расследуемости.
-2. **Двухфакторки у админки нет**, только ограничение частоты. Для одного владельца это приемлемо;
-   если появится второй сотрудник — `django-otp`.
-3. **Картинки слайдов** загружаются в админке без пересжатия (в отличие от превью товаров, которые
-   проходят через Pillow). Загрузить SVG со скриптом может только персонал, и он же его увидит по
-   `/media/`, но политику стоит помнить.
-
-## 2026-08-29 — sitemap.xml для двуязычной витрины
-
-**Задача.** Карта сайта, где каждый адрес присутствует в обеих языковых версиях (`i18n_patterns`),
-с hreflang и `x-default`.
-
-**Решение.** `django.contrib.sitemaps` с `Sitemap.i18n = True`, `alternates = True`,
-`x_default = True`; сами наборы — `storefront/sitemaps.py`, маршруты вне `i18n_patterns`.
-
-**Почему так.** Фреймворк уже обходит items по одному разу на язык и реверсит адрес с активным
-языком — ровно то, что делает `i18n_patterns`. Свой генератор повторил бы `reverse()` под
-`translation.override` и со временем разошёлся бы с `storefront/seo.py`, который строит те же
-hreflang для `<head>`. Статически сгенерированный файл ломался бы на каждом новом товаре.
-
-**Минусы и чем платим.** `x-default` фреймворк строит вычитанием языкового префикса
-(`/en/info/` → `/info/`), то есть указывает на адрес, который отвечает 302 на язык браузера, а не
-200. Это стандартная практика (и мы повторили ту же формулу в `seo.x_default`, чтобы `<head>` и
-карта говорили одно), но проверять её надо руками — что префикс-less адрес действительно
-редиректится, а не 404-ится.
-
-## 2026-08-29 — индекс карты вместо одного urlset
-
-**Задача.** Отдать четыре набора адресов (главная, разрезы каталога, товары, страницы) одной
-картой.
-
-**Решение.** `django.contrib.sitemaps.views.index` на `/sitemap.xml` + `views.sitemap` на
-`/sitemap-<section>.xml`.
-
-**Почему так.** Изначально планировался один `urlset` со всеми секциями — тест на переполнение
-показал, что `Sitemap.limit` применяется **к каждой секции отдельно**: при лимите 10 общий файл
-отдавал 24 адреса. Значит один файл на четыре секции может незаметно перевалить за 50 000 URL,
-которые разрешает протокол, хотя каждая секция «в пределах лимита». Индекс убирает эту арифметику
-и включается двумя строчками в `urls.py`.
-
-**Минусы.** Краулер делает на один запрос больше; имя маршрута секции фиксированное
-(`django.contrib.sitemaps.views.sitemap`) — его реверсит сам `views.index`.
-
-## 2026-08-29 — robots.txt рендерит Django, а не статика
-
-**Задача.** Отдать `robots.txt` со ссылкой на карту.
-
-**Решение.** Шаблон `storefront/robots.txt` + вьюха с `content_type="text/plain"`; строка
-`Sitemap:` собирается через `backend.sites.absolute_url`.
-
-**Почему так.** Домен и схема уже живут в одном месте (`django_site` + `SITE_SCHEME`), и это
-единственный способ получить верную ссылку и в dev, и в проде. Файл в статике или `location` в
-nginx продублировали бы знание о домене и разъехались бы с ним.
-
-**Минусы.** Лишняя вьюха ради семи строк текста; зато они покрыты тестом.
-
-## 2026-08-29 — `make dev-frontend` не открывался
-
-**Задача.** Vite dev-сервер не отдавал страницу ни на `/`, ни где-либо ещё.
-
-**Решение.** `base` в `vite.config.js` применяется только при `mode === 'production'`; в dev база
-— корень. Плюс в `main.js` pinia регистрируется раньше роутера.
-
-**Почему так.** Vite применяет `base` и в dev-режиме, а `server.proxy` уводил весь `/static`
-(включая собственную базу дев-сервера) на Django, где лежит только сборка `make spa`. Условие по
-`mode` — идиома самого vite, уже использованная там для `__API_URL__`. Второй баг вылез сразу за
-первым: vue-router стартует первую навигацию из своего `install()`, поэтому редирект `/` → `/en/`
-успевал спросить стор языка до того, как pinia становилась активной; в проде это не проявлялось,
-потому что голый корень редиректит Django.
-
-**Минусы.** В dev и в проде адреса ассетов различаются — если понадобится воспроизвести прод-пути
-локально, это делается через `make spa`, а не дев-сервером.
-
-## 2026-08-30 — поиск по товарам ушёл на сервер
-
-**Задача.** При активном поиске витрина показывала кнопки «Показать ещё» и «Загрузить предыдущие»,
-причём нажатие ничего не добавляло на экран.
-
-**Решение.** `?q=` у `/api/catalog/products/` (`ProductQuerySet.search`, `icontains` по `name_en` и
-`name_ru`, длина запроса режется по `MAX_SEARCH_LENGTH = 100`). Клиентский фильтр по загруженным
-карточкам убран, запрос стал частью «фасета» вместе со страной и типом.
-
-**Почему так.** Клиентский поиск (как в `design/app.js`) фильтровал только загруженные страницы, а
-`count` приезжал по всему каталогу — отсюда и лишние кнопки, и «пустая» подгрузка. Серверный
-вариант — одна строка в queryset и общий счётчик, который сразу делает кнопки честными. Обрезка
-длины — защита от флуда: `icontains` по пяти тысячам символов ничего не находит, но работу БД
-делает.
-
-**Минусы.** Каждый ввод — запрос к API (debounce 300 мс). Поиск нечувствителен к опечаткам, это не
-полнотекст; если понадобится — `SearchVector` уже по месту.
-
-## 2026-08-30 — вход на `?page=5` и автоподгрузка вверх
-
-**Задача.** Заход по ссылке с номером страницы оставлял читателя наверху документа, а товары были
-ниже экрана; попытка проскроллить к сетке приводила к тому, что сама собой подгружалась
-предыдущая страница.
-
-**Решение.** После загрузки страницы > 1 сетка ставится в верх экрана и **удерживается** там
-(`ResizeObserver` перепинивает, пока картинки выше догружаются), а автоподгрузка вверх включается
-только после первого действия читателя (`wheel`/`touchstart`/`keydown`/`pointerdown`).
-
-**Почему так.** Свежеотрисованная страница короткая: картинок ещё нет, поэтому блок «Загрузить
-предыдущие» оказывается в зоне видимости, IntersectionObserver честно об этом сообщает — и читателя
-утаскивает на страницу выше той, что он просил. Запись наблюдателя — снимок прошлого кадра, поэтому
-проверять её геометрией на момент вызова недостаточно: нужен признак «читатель сам двинул страницу».
-
-**Минусы.** Программная прокрутка (тесты, скрипты) автоподгрузку вверх не включает — проверять надо
-настоящим `mouse.wheel`. Кнопка при этом работает всегда.
-
-## 2026-08-30 — точки слайдера и кнопки
-
-**Задача.** Точки переключения баннера съедали низ слайда (картинка не доходила до края), а
-фиолетовый градиент дизайна стоял вообще на всех кнопках.
-
-**Решение.** Отступ под точки перенесён с `.content` на `.content__block` (картинка выровнена по
-низу, поэтому padding на контейнере поднимал именно её), точки лежат поверх слайда внутри его
-101px-паддинга. Кнопки: `src/assets/buttons.css` с `.btn-ghost`, `.btn-solid` и
-`.btn-ghost--light`; градиент остался у героя и карточек.
-
-**Почему так.** Правка геометрии в компоненте, а не в `style.css`: тот остаётся копией макета, и
-любая наша правка в нём разъедется с обновлением от дизайнера. Активное состояние фильтров (класс
-`.current`) тоже пришлось описать самим — в макете оно рисовалось через `input:checked + span`, а у
-нас это `router-link`.
-
-**Минусы.** Два варианта кнопок вне макета — если дизайнер пришлёт свои, наши придётся выбрасывать.
-
-## 2026-08-30 — якорь прокрутки на карточке, а не на сетке
-
-**Задача.** Заход по `?page=4` всё равно оставлял читателя наверху страницы, а подгрузка вверх
-срабатывала сама и утаскивала на страницу выше.
-
-**Решение.** Якорем стала первая карточка запрошенной страницы: она ставится под фиксированную
-шапку и удерживается там покадрово (`requestAnimationFrame`), пока верстка выше не перестанет
-двигаться или читатель не тронет страницу. Все прокрутки — `behavior: "instant"`. Восстановление
-после вставки предыдущей страницы считается по той же карточке, а не по `scrollHeight`. Автозагрузка
-вверх включена только по направлению прокрутки (`scroll`-слушатель) и не чаще одного раза, пока блок
-не уйдёт с экрана.
-
-**Почему так.** Три причины накладывались: `style.css` включает `scroll-behavior: smooth` на `<html>`,
-поэтому `scrollIntoView` анимировался и умирал от первого колеса читателя; якорем была сама сетка,
-у которой верх поднимается при каждой вставке — и цикл удержания сам возвращал читателя к блоку
-«Загрузить предыдущие»; а IntersectionObserver после вставки честно видел этот блок на экране, что
-давало каскад до первой страницы. Наблюдатель не знает направления — знает только `scroll`.
-
-**Минусы.** Автоподгрузка вверх не срабатывает на программной прокрутке (в тестах нужен реальный
-`mouse.wheel`), и якорь на две секунды спорит с браузерным восстановлением позиции.
-
-## 2026-08-30 — бесконечную прокрутку заменили постраничной навигацией
-
-**Задача.** Заказчик: «может нафиг снесём эту бесконечную прокрутку? От неё тупо больше багов».
-Плюс вопрос, почему `?page=` в адресе не совпадает с тем, что на экране.
-
-**Решение.** Одна страница на экране и она же в адресе. `Catalog.vue` читает `?page=` и грузит
-ровно её; номера страниц рисует `components/storefront/Pagination.vue` (первая, последняя и окно
-вокруг текущей, разрывы — многоточием), бот-страница `storefront/catalog.html` рисует тот же набор
-по тем же адресам (окно считает `Paginator.get_elided_page_range`). Первая страница — без
-параметра, это канонический адрес листинга. Общие стили кнопок и пагинации переехали в
-`storefront/css/shop.css`, который подключают обе презентации.
-
-**Почему так.** Диапазон страниц требовал якоря прокрутки, двух наблюдателей и догадки о
-направлении движения читателя — и всё равно оставлял `?page=` описанием «сколько загружено», а не
-«что видно». За три захода это дало четыре разных бага. Каталог обозримый (сейчас 130 товаров, при
-1000 — 42 страницы), а обычная пагинация даёт то, чего у прокрутки не было: адрес совпадает с
-экраном, страница переживает перезагрузку, краулер попадает на любую страницу с любой, и весь код
-— один `watch` на маршрут.
-
-**Минусы.** Нельзя «долистать» каталог одним движением; на каждую страницу — запрос (кэширование
-на клиенте, если понадобится, ложится поверх без изменения адресов).
-
-## 2026-08-30 — баннер переписан с нуля, без наследия swiper
-
-**Задача.** Заказчик: «переделай с нуля баннер на сайте». Внешний вид оставить прежним, вёрстку
-сделать свою.
-
-**Решение.** `components/storefront/SlidesCarousel.vue` удалён, вместо него `Banner.vue` и блок
-`.banner` в `storefront/css/shop.css`; бот-страница рисует тот же блок с модификатором
-`.banner--static` (слайды столбиком). Панель — один элемент с настоящим `border-radius` и
-`overflow: hidden`. Слайды лежат в одной ячейке grid: высота — по самому высокому, при смене не
-прыгает, между ними кроссфейд. Управление: стрелки, точки, свайп (pointer events) и клавиши
-влево/вправо. Автопрокрутка (7 с) останавливается на наведении, на фокусе, на скрытой вкладке и при
-`prefers-reduced-motion`; невидимый слайд помечен `inert`, поэтому его ссылка выпадает из
-табуляции. Подписи стрелок и точек — новые ключи `storefront.banner.*` в обеих локалях.
-
-**Почему так.** В `style.css` скруглённая панель была нарисована подделкой: две белые градиентные
-полосы поверх верхнего края и две маски `box-shadow: 0 0 0 30px #fff` по углам. Это работает только
-на белой странице и рисует поверх слайда, а классы `.swiper-*` тянули за собой предположения
-плагина, которого в проекте нет (высоту он мерил джаваскриптом на инициализации). Свой блок короче
-и не зависит ни от того, ни от другого.
-
-**Проверено в браузере** (headless chromium через CDP): SPA и бот-страница на 320/390/470/560/768/
-880/1024/1280 — горизонтального переполнения нет, высота баннера держится при смене слайда, консоль
-чистая; `make dev-test t="storefront"` — 44 теста, зелено.
-
-**Минусы.** Вёрстка баннера больше не совпадает с `design/index.html`: правку из макета придётся
-переносить в `.banner` руками.
-
-## 2026-08-31 — адаптив баннера: телефон, планшет и альбомная ориентация
-
-**Задача.** Заказчик: «на телефоне баннер выглядит не очень».
-
-**Решение.** Три полосы вместо одной. До 880px — картинка сверху, текст под ней, всё по центру;
-до 560px — стрелки скрыты, картинка 200x130, заголовок 22px, отступы уже (высота на 390px упала
-с 548 до 363, на 320px — с 568 до 383). Отдельное правило для телефона в альбомной ориентации
-(`max-height: 520px and orientation: landscape`): картинка возвращается вбок от текста, иначе
-столбик выше экрана. `.banner__body` в столбике получил `flex: 0 0 auto` — при `flex: 1 1 auto`
-он забирал всю свободную высоту себе, и на коротком слайде текст висел вверху, а под ним зияла
-пустая фиолетовая полоса.
-
-**Почему так.** Слайды делят одну высоту (по самому высокому), поэтому на телефоне пустоту
-короткого слайда видно особенно хорошо: лечится не высотой, а тем, чтобы самый высокий слайд был
-ниже — меньше картинка, меньше кегль, меньше поля — и тем, чтобы остаток делился поровну сверху и
-снизу.
-
-**Проверено в браузере**: 320/360/390/430/480/540/560/561/640/768/880/881/1024/1280/1600 и
-альбомные 740x360, 640x300 — переполнения нет, консоль чистая, бот-страница на 360 совпадает.
-
-**Минусы.** На границе 560/561 высота скачет (316 → 421): полосы разные по кеглю и картинке.
-
-## 2026-08-31 — админка: страница товара падала на поле с файлом
-
-**Задача.** `ValueError: This file is not accessible via a URL.` на
-`/admin/catalog/product/<id>/change/`, `django.contrib.admin.options.change_view`.
-
-**Причина.** `ProductFilesStorage` намеренно без `base_url` (ADR-0001, файл отдаёт только
-`DownloadFileView` по токену), а `AdminFileWidget` спрашивает URL дважды: `is_initial()` в питоне
-(`getattr(value, "url", False)`) и `<a href="{{ widget.value.url }}">` в шаблоне. Оба упираются в
-`FileSystemStorage.url()`, который здесь бросает `ValueError` — страница отдаёт 500.
-
-**Решение.** `catalog/admin.py: ProductFileInput` наследует **`AdminFileWidget`** (а не голый
-`ClearableFileInput`: у админского виджета свой шаблон, класс `file-upload` и `use_fieldset`), даёт
-свой `is_initial()` через `isinstance(value, FieldFile)` и считает `value_url` в питоне. Шаблон
-`catalog/templates/catalog/widgets/product_file_input.html` — копия админского, где ссылка стала
-условной: есть URL — есть `<a>`, нет — только имя файла. Подключено
-`formfield_overrides = {models.FileField: {"widget": ProductFileInput}}`.
-
-**Почему ссылка условная, а не выброшенная.** `ImageField` — подкласс `FileField`, и
-`formfield_overrides` поймает превью, если его когда-нибудь повесят на сам `Product`; безусловный
-«никогда не линковать» тихо сломал бы им ссылку. Проверка идёт по факту (`try: value.url`), а не по
-классу хранилища, — S3-подобные хранилища `base_url` не выставляют.
-
-**Минусы.** Шаблон — копия апстримного за вычетом условия: смена вёрстки виджета в Django пройдёт
-мимо него. Из админки файл по-прежнему никак не скачать — единственный путь к нему
-`DownloadFileView` по токену заказа; staff-скачивание товара, если понадобится, отдельная задача.
-
-**Проверено.** `catalog.tests.ProductAdminTests` — change-страница 200 и печатает имя файла, `</a>`
-после имени нет, add-страница 200, `value_url` возвращает ссылку для превью и `""` для платного
-файла. Рендер виджета сверен с админским глазами (`p.file-upload`, `<br>`, `Change:`). Весь набор —
-284 теста, зелено.
-
-## 2026-08-31 — правки по ревью PR #9: страницы каталога, шапка, hero
-
-**Задача.** Семь замечаний к PR: рефакторинг обработчика скролла и `Pagination.items`, оставшийся
-флаг `showHero`, назначение `countryBySlug`, два `Math.max` в `Catalog.vue`, «что-то не так» в
-обработке 404 и вопрос к `scrollToGrid`.
-
-**Что нашлось по ходу.** SPA считала число страниц сама: `PAGE_SIZE = 24` в `Catalog.vue` против
-`catalog.views.PAGE_SIZE`, где уже стояло 100. Пагинация рисовала шесть страниц из двух, клик по
-несуществующей получал 404, коррекция считала последнюю тем же делением, делала `replace` на тот же
-`?page=` — вотчер не срабатывал, сетка навсегда оставалась в `loading`. Теперь
-`CatalogPagination.get_paginated_response` отдаёт **`total_pages`**, и копии размера страницы во
-фронте нет.
-
-**Остальное.**
-- `Pagination.vue` — порт `Paginator.get_elided_page_range(on_each_side=1, on_ends=1)`, того самого
-  окна, которое просит `storefront/views.py`. Свой алгоритм давал другой набор номеров, чем
-  бот-страница на том же адресе; сверено перебором 1..12 страниц — совпадает.
-- `showHero` убран: полосу по-прежнему рисует `App.vue`, но hero приходит **именованным
-  `router-view`** — маршрут листинга объявляет `components: {default: Catalog, hero: HomeHero}`,
-  остальные не объявляют ничего. Это `base.html` с блоком `hero`, который перекрывает
-  `catalog.html`, только в роутере: ни флага в шаблоне, ни `PageDecor` в каждой вьюхе.
-- Скролл шапки — в `composables/useHeaderScroll.js`.
-- `page` вместо `Math.max` проверяет `Number.isInteger(...) && > 1`: `?page=abc`, `2.5` и `-3`
-  одинаково означают первую страницу. Второй `Math.max` ушёл вместе с делением на `PAGE_SIZE`.
-- Обработка 404 плоская: `load()` ловит один раз, `landOnLastPage()` спрашивает первую страницу и
-  правит адрес на последнюю; загрузку делает вотчер.
-- `scrollToGrid` — один скролл вместо цикла `rAF` на 1.5 секунды, и только при смене номера
-  страницы (набор запроса больше не дёргает страницу из-под рук). Прыжок высоты, ради которого жил
-  цикл, лечится в вёрстке: высота у `.banner__media` и `width`/`height` у `home-img.png`.
-
-**Минусы.** Именованный `router-view` — вторая точка, куда смотреть при добавлении маршрута
-(hero объявляется там, а не во вьюхе). Коррекция «страница за концом» стоит трёх запросов.
-
-**Проверено.** 286 тестов зелёные (добавлены `total_pages` и 404 за концом; тест про пагинацию
-поиска больше не зависит от размера страницы). В браузере: главная, `?page=2`, `?page=99` →
-коррекция на 2, `?page=abc` → первая, поиск, товар, корзина, модалка оплаты, 404, 375px без
-горизонтального переполнения.
+# Journal
+
+Traps that cost time and can bite again: what broke, why, and what the fix assumes. Newest first.
+The architecture itself is in [`architecture.md`](./architecture.md).
+
+## 2026-08-29 - the Plisio callback signature: `?json=true` is not optional
+
+**Two separate ways every real payment was being refused.**
+
+1. **A form and a JSON body are signed differently.** Without `?json=true` Plisio posts
+   `application/x-www-form-urlencoded` and computes `verify_hash` from PHP's `serialize()` of the
+   sorted array. Our `validate_hash` computes an HMAC over the JSON string, so a form callback could
+   never pass - no amount of fixing the parsing would have helped.
+2. **Even in JSON mode we disagreed with Plisio.** The official
+   [plisio-python](https://github.com/Plisio/plisio-python) hashes the body **in the order received**
+   and with `ensure_ascii=True`; we had `sort_keys=True, ensure_ascii=False`. That matches only if
+   Plisio happens to send alphabetical keys and no non-ASCII.
+
+On top of that, when the body *was* a form, `request.data` was a `QueryDict`, whose `copy()` stays a
+`QueryDict`: `pop()` returns a **list** and `dict()` wraps every value in a list, so the comparison
+was `"abc" == ["abc"]` - always false.
+
+**Fix.** `validate_hash` accepts both readings of the body (as received and key-sorted) - each is
+still an HMAC with our key, so nothing can be forged, and the key-order lottery is gone. The body is
+normalised once at the top of the view (`request.data.dict()` for a `QueryDict`, `dict(...)`
+otherwise). And `callback_url` with `?json=true` now ships with every invoice
+(`sales/views.py: callback_url()`) instead of being configured in the dashboard: a parameter that
+decides whether any payment is accepted must not rest on someone's memory.
+
+**Why the tests were silent.** They signed the payload with the same function they verified with,
+and posted `format="json"` - the shape of a request that production never sends. A test that picks
+its own convenient request format tests itself, not the integration. For an external webhook the
+request format is part of the contract and belongs in the test: the current ones post a form and
+sign the way the SDK signs (keys out of alphabetical order, a Cyrillic value).
+
+**Cost.** In dev `callback_url` is built from the `django_site` row (`localhost:8000`), which Plisio
+cannot reach, so local payments are still exercised with a forged signed callback.
+
+## 2026-08-29 - security review: what was left alone, and why
+
+Deliberate trade-offs, so they do not get "fixed" by accident later:
+
+- **The callback has no authentication** - that is how Plisio works, a signature instead of a
+  session. The body influences nothing except through `callback_to_fields` and `apply_order_status`.
+- **Checkout has no CSRF.** DRF's `APIView` is csrf_exempt and the buyer is anonymous, so there is
+  nothing to protect but our own spend - which is what the `limit_req` zone, `MAX_ORDER_ITEMS` and
+  the MX check cover.
+- **`/api/send-links/` does confirm that an address has purchases** (404 vs 200). Without it the
+  recovery form cannot tell someone they mistyped their address. Rate limited to 5 r/m.
+- **Token guessing is pointless**: UUID4, 24h TTL, the same 404 for unknown, malformed and expired,
+  and `refresh` scoped by customer (`of_customer`).
+
+Fixed at the same time, and easy to regress: the callback HMAC is compared with
+`hmac.compare_digest`; the Plisio key travels in a query string and `requests` puts the full URL in
+the exception text, so log writes go through `redact()` (a test fails the build if the key reappears
+in a log record); `/admin/login/` has its own `limit_req` zone, because Django does not lock an
+account after failed attempts; and DRF's browsable renderer - a writable HTML form on every endpoint
+- is enabled under `DEBUG` alone.
+
+## 2026-08-30 - numbered pages instead of infinite scroll
+
+The owner asked to drop infinite scroll ("it just causes more bugs") and asked why `?page=` did not
+match what was on screen.
+
+**Why it kept breaking.** Holding a *range* of pages needs a scroll anchor, two
+`IntersectionObserver`s and a guess at the reader's direction - and `?page=` still described "how
+much is loaded", not "what is visible". Three attempts produced four different bugs: a freshly
+rendered page is short (images have not loaded), so the "load previous" block is on screen, the
+observer honestly reports it and the reader is dragged to the page above the one they asked for;
+`style.css` sets `scroll-behavior: smooth` on `<html>`, so `scrollIntoView` animated and died on the
+reader's first wheel; and the anchor was the grid itself, whose top moves on every insert.
+
+**What replaced it.** One page on screen and the same page in the address. The value that used to
+drift is now the server's: `CatalogPagination` returns `total_pages`, so the SPA holds no copy of
+the page size (one copy did drift - `PAGE_SIZE = 24` in the view against 100 in the API - and the
+grid offered pages the API answered 404 for). `Pagination.vue` is a port of
+`Paginator.get_elided_page_range(on_each_side=1, on_ends=1)`, verified against the bot page by
+walking 1..12 pages, so both presentations print the same numbers at the same addresses.
+
+**Cost.** No skimming the whole catalog in one gesture, and one request per page.
+
+## 2026-08-30 - the banner was rewritten instead of ported
+
+The mockup's rounded panel is a fake: two white gradient strips over the top edge and two
+`box-shadow: 0 0 0 30px #fff` masks at the corners. It only works on a white page and it paints over
+the slide. The `.swiper-*` classes carried assumptions of a plugin we do not ship (it measured
+height in JavaScript on init), and the arrow styling in `style.css` only colours them - `position`,
+`z-index` and the chevron itself came from `swiper-bundle.css`.
+
+So `.banner` in `shop.css` is ours: a real `border-radius` with `overflow: hidden`, slides in one
+grid cell so the height is the tallest slide's and never jumps. **This is the one place where our
+markup deliberately diverges from `design/index.html`** - a change from the designer has to be
+carried into `.banner` by hand.
+
+On phones the shared height is what hurts: a short slide shows the gap. It is fixed by making the
+tallest slide shorter (smaller image, smaller type, tighter padding) rather than by pinning a
+height, and `.banner__body` needs `flex: 0 0 auto` - with `1 1 auto` it eats the free height and
+leaves an empty purple band under the text.
+
+## 2026-08-29 - the sitemap is an index, and robots.txt is a view
+
+Splitting into `/sitemap-<section>.xml` was not cosmetic: an overflow test showed that
+`Sitemap.limit` applies **per section**, so with a limit of 10 the combined file served 24 URLs.
+One file over four sections could quietly pass the protocol's 50 000 while every section looked
+"within limits".
+
+`django.contrib.sitemaps` with `i18n`, `alternates` and `x_default` is used rather than a generator
+of our own, because the framework already walks items once per language and reverses with the active
+language - exactly what `i18n_patterns` does - and a hand-written one would drift away from
+`storefront/seo.py`, which builds the same hreflang set for `<head>`.
+
+`robots.txt` is a Django view (`content_type="text/plain"`) so its `Sitemap:` line comes from
+`backend.sites.absolute_url`: the domain and scheme already live in one place (`django_site` +
+`SITE_SCHEME`), and a static file or an nginx `location` would duplicate that knowledge.
+
+**Watch out:** the framework builds `x-default` by removing the language prefix (`/en/info/` →
+`/info/`), i.e. it points at an address that answers 302, not 200. That is standard practice and
+`seo.x_default` repeats the same formula, but the redirect has to be verified by hand.
+
+## 2026-08-29 - `make dev-frontend` served nothing
+
+Vite applies `base` in dev too, and `server.proxy` sent all of `/static` - including the dev
+server's own base - to Django, where only the `make spa` build lives. The fix is to apply `base`
+only when `mode === 'production'`, vite's own idiom, already used there for `__API_URL__`.
+
+A second bug hid behind it: vue-router starts its first navigation from `install()`, so the
+`/` → `/en/` redirect asked the language store for an answer before pinia was active. Pinia is now
+registered before the router in `main.js`. Production never showed it, because there Django
+redirects the bare root.
+
+**Cost.** Asset URLs differ between dev and production; reproduce production paths with `make spa`,
+not with the dev server.
+
+## 2026-08-31 - a storage without `base_url` breaks the admin file widget
+
+`/admin/catalog/product/<id>/change/` answered 500 with
+`ValueError: This file is not accessible via a URL.` `ProductFilesStorage` has no `base_url` on
+purpose - a paid file is only reachable through `DownloadFileView` - but `AdminFileWidget` asks for
+the URL twice: `is_initial()` in Python and `<a href="{{ widget.value.url }}">` in the template.
+
+`catalog/admin.py: ProductFileInput` subclasses **`AdminFileWidget`** (not a bare
+`ClearableFileInput`, which loses the admin template, the `file-upload` class and `use_fieldset`),
+overrides `is_initial()` with an `isinstance(value, FieldFile)` check and computes `value_url` in
+Python; the template is a copy of the admin's with the link made conditional. The link is
+conditional rather than removed because `ImageField` subclasses `FileField`, so
+`formfield_overrides` would also catch a preview field if one is ever added to `Product`, and the
+check is on the fact (`try: value.url`) rather than on the storage class - S3-style storages do not
+set `base_url` either.
+
+**Cost.** That template is an upstream copy minus one condition, so a widget markup change in Django
+will pass it by. Any new `FileField` on a private storage inherits this problem.
+
+## 2026-09-03 - `SITE_ID` under `DEBUG` only: the whole site 500s on a fresh deploy
+
+Every page of the first deploy, `/admin/login/` included, answered 500 with
+`Site.DoesNotExist: Site matching query does not exist.` `SITE_ID = 1` was set inside the
+`if DEBUG:` block, so in production `Site.objects.get_current(request)` (`backend/sites.py`, and
+Django's own `get_current_site` in the admin login view) fell back to resolving the site by the
+request's `Host`. Nothing in the database matched that host, and the row could only be created in
+the admin - which was the page refusing to open. `django.contrib.sites` is in `INSTALLED_APPS`, so
+the `RequestSite` fallback Django has for that function never applies.
+
+The same gap killed broadcasts silently: `make_unsubscribe_url` is called from the cron command with
+no request at all, where a missing `SITE_ID` raises `ImproperlyConfigured` instead - once per
+recipient, each one swallowed into a FAILED delivery row.
+
+`SITE_ID = 1` is now unconditional, `storefront/migrations/0001_ensure_site.py` guarantees the row
+exists on an older database, and a `Tags.database` check warns at `migrate` time while the domain is
+still `example.com` - the point being that the placeholder does not 500, it silently mails links to
+example.com.
+
+**Cost.** The domain is still a manual step in the admin; the check is the only thing that shouts
+about it. A test that only ever runs with `DEBUG=True` cannot see any of this - `mailing/tests.py`
+had been creating the site row at pk=1 by hand, which is exactly what hid the bug.
+
+## 2026-09-03 - cron in the backend container had no environment
+
+`backend/cronjob` called `manage.py` directly and `startup.sh` only did `service cron start`. Cron
+strips the environment, the backend's settings come from compose `env_file`, and `settings.py` reads
+`os.environ` alone - so every broadcast run and every callback prune died at import on
+`SECRET_KEY`. Nothing logged it anywhere anybody looked.
+
+`startup.sh` now dumps the environment to `/etc/psdshop-cron.env` (`chmod 600`) and each crontab
+line sources it, which is what `postgres/entrypoint.sh` had already been doing for `backup.sh` since
+the beginning - the pattern existed one directory away. The dump is `compgen -e`, not a named list,
+so a new setting cannot quietly break the sender months later; the crontab sets `SHELL=/bin/bash`
+because `printf %q` quoting is bash's.
+
+**Cost.** Two containers now solve this the same way in two places. If a third ever needs cron,
+extract the dump instead of copying it a third time.
+
+## 2026-09-03 - `style.css` is a copy of the mockup plus thirteen rewritten paths
+
+`CLAUDE.md` says our copy of the designer's stylesheet stays a copy, with `.banner` as the one
+deliberate divergence. It is not quite the whole story, and the missing half is the kind that
+breaks silently: the design serves `style.css` from the same directory as `fonts/` and `img/`,
+while ours lives in `static/storefront/css/`, so every asset URL in it is rewritten one level up
+(`url("fonts/…")` -> `url("../fonts/…")`). Thirteen lines, and the CRLF line endings stripped.
+
+Verified with `diff <(tr -d '\r' < design/style.css) <(tr -d '\r' < backend/storefront/static/storefront/css/style.css)`:
+those rewrites are the *only* difference - no rule, colour or breakpoint of the mockup has been
+touched, which is what the rule is really protecting.
+
+**Cost.** Re-copying an updated `style.css` from the designer without redoing the rewrite loses
+every font and every background image, and nothing fails - the page just renders in a fallback
+font. Run that diff after any re-copy: anything in it other than `url(` lines is an accident.
+
+## 2026-09-03 - Django stamped the machine hostname into every outgoing e-mail
+
+The first live SendPulse test arrived with `standard-intel-de-1-v-2-7005287-516006-main` in the
+body, which is only the text of Django's own `sendtestemail`. The leak underneath it is not:
+`django/core/mail/utils.py` caches `socket.getfqdn()` in `DNS_NAME`, and two call sites use it on
+*every* message - `message.py` builds `Message-ID: <...@that-hostname>` and the SMTP backend hands
+it to the relay as the EHLO name, which SendPulse then writes into a `Received:` header. Both
+travel to the recipient in the raw source.
+
+Beyond the ugliness, a `Message-ID` whose domain does not match `From:` is a spam signal, and in
+production the name would have been the container id - different on every rebuild.
+
+`settings.py` now pins `DNS_NAME._fqdn` to `EMAIL_FQDN`, which defaults to the domain of
+`DEFAULT_FROM_EMAIL`, so the two cannot drift apart without someone setting the override on
+purpose. `docker-compose.yaml` also names the backend container, but that is for logs only - it is
+not what protects the header.
+
+**Cost.** The default is only as good as `DEFAULT_FROM_EMAIL`: left at the `.env.dist` placeholder
+it stamps `example.com`, which is worse than a hostname. Check the header itself after any change
+to the sender address - Gmail, "Show original", the `Message-ID` line.

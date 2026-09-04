@@ -1,6 +1,6 @@
 /* What the storefront needs and the mockup does not ship, dressed for both presentations: the SPA
    and the server-rendered bot page link this file next to style.css, so a button or a page number
-   looks the same whichever one the visitor got (ADR-0010).
+   looks the same whichever one the visitor got (docs/architecture.md).
 
    Two button variants first.
 
@@ -93,7 +93,7 @@
 
 
 /* The welcome banner - components/storefront/Banner.vue and the `.banner--static` block in
-   storefront/catalog.html render the same box, so both presentations show one banner (ADR-0010).
+   storefront/catalog.html render the same box, so both presentations show one banner (docs/architecture.md).
 
    Written from scratch, not on the mockup's slider: `style.css` faked the rounded purple panel
    with two white gradient strips and two `box-shadow: 0 0 0 30px #fff` corner masks, which only

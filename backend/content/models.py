@@ -7,6 +7,22 @@ from backend.seo import MetaTagsMixin
 from backend.urlspace import validate_not_reserved, validate_slug_is_free
 
 
+class PageQuerySet(models.QuerySet):
+    def published(self) -> "PageQuerySet":
+        return self.filter(is_published=True)
+
+    def menu(self) -> "PageQuerySet":
+        """
+        The pages that have an address of their own: everything published bar the home block.
+
+        One definition, because four places need the same answer - the API, the bot pages' nav,
+        the sitemap and the page view itself - and a menu that lists a page the view 404s on, or a
+        sitemap that advertises one, is the kind of drift nothing fails loudly about.
+        """
+
+        return self.published().exclude(slug=Page.HOME)
+
+
 class Page(MetaTagsMixin):
     """
     A text page written in the admin: the rules, the contacts, the SEO block of the home page.
@@ -28,6 +44,8 @@ class Page(MetaTagsMixin):
 
     is_published = models.BooleanField(default=True)
     updated_at = models.DateTimeField(auto_now=True)
+
+    objects = PageQuerySet.as_manager()
 
     class Meta:
         verbose_name = _("Page")

@@ -1,7 +1,7 @@
 import Localized from '@/models/Localized.js';
 
 // One catalog card, or the whole product page when the detail endpoint filled it in. A product is
-// a template sold any number of times (ADR-0001): no stock, no quantity, and the price is USD.
+// a template sold any number of times (docs/architecture.md): no stock, no quantity, and the price is USD.
 export default class Product extends Localized {
     static translated = ['name', 'description'];
 

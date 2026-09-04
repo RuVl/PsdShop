@@ -180,10 +180,63 @@ class DynamicRenderingTests(TempUploadsMixin, TestCase):
                     self.assertContains(response, '<div id="app">', msg_prefix=f"{ua} {url}")
                     self.assertContains(response, 'name="robots" content="noindex"', msg_prefix=f"{ua} {url}")
 
+    def _second_product(self):
+        Product.objects.create(
+            country=Country.objects.get(slug="germany"),
+            document_type=DocumentType.objects.get(slug="utility-bill"),
+            year=2023,
+            price=Decimal("10.00"),
+            slug="two",
+            name_en="Germany utility bill 2023",
+            name_ru="Германия счёт 2023",
+            is_active=True,
+            file=ContentFile(b"x", name="two.psd"),
+        )
+
     def test_canonical_keeps_pagination_drops_filters(self):
-        with shell_on_disk():
+        self._second_product()
+        with shell_on_disk(), patch("storefront.views.PAGE_SIZE", 1):
             response = self.client.get("/en/germany/all/?page=2&utm_source=x", HTTP_USER_AGENT=BOT_UA)
         self.assertContains(response, 'rel="canonical" href="http://example.com/en/germany/all/?page=2"')
+
+    def test_canonical_clamps_a_page_past_the_end(self):
+        """`?page=999` renders the last page, so it must not canonicalize to itself."""
+
+        self._second_product()
+        with shell_on_disk(), patch("storefront.views.PAGE_SIZE", 1):
+            response = self.client.get("/en/germany/all/?page=999", HTTP_USER_AGENT=BOT_UA)
+        self.assertContains(response, 'rel="canonical" href="http://example.com/en/germany/all/?page=2"')
+
+    def test_canonical_of_a_page_past_the_end_of_a_single_page_listing_is_bare(self):
+        with shell_on_disk():
+            response = self.client.get("/en/germany/all/?page=999", HTTP_USER_AGENT=BOT_UA)
+        self.assertContains(response, 'rel="canonical" href="http://example.com/en/germany/all/"')
+
+    def test_the_shell_carries_the_same_clamped_canonical(self):
+        """The clamp lives in build_meta, so the SPA branch cannot drift from the bot one."""
+
+        with shell_on_disk():
+            response = self.client.get("/en/germany/all/?page=999", HTTP_USER_AGENT="Mozilla/5.0 (X11; Linux x86_64)")
+        self.assertContains(response, 'rel="canonical" href="http://example.com/en/germany/all/"')
+
+    def test_the_bot_listing_applies_the_search(self):
+        """A crawler on `?q=` must see the filtered set the API returns, not the whole facet."""
+
+        self._second_product()
+        with shell_on_disk():
+            response = self.client.get("/en/germany/all/?q=2023", HTTP_USER_AGENT=BOT_UA)
+        self.assertContains(response, "Germany utility bill 2023")
+        self.assertNotContains(response, "Germany utility bill 2022")
+
+    def test_the_bot_pagination_carries_the_search(self):
+        self._second_product()
+        with shell_on_disk(), patch("storefront.views.PAGE_SIZE", 1):
+            response = self.client.get("/en/germany/all/?q=utility", HTTP_USER_AGENT=BOT_UA)
+        self.assertContains(response, 'href="?q=utility&amp;page=2"')
+
+    def test_the_all_all_redirect_keeps_the_search(self):
+        response = self.client.get("/en/all/all/?q=utility", HTTP_USER_AGENT=BOT_UA)
+        self.assertRedirects(response, "/en/?q=utility", status_code=301, fetch_redirect_response=False)
 
 
 class ProductPageTests(TempUploadsMixin, TestCase):
@@ -228,6 +281,15 @@ class ProductPageTests(TempUploadsMixin, TestCase):
         Country.objects.create(slug="france", code="fr", name_en="France", name_ru="Франция")
         url = f"/en/france/utility-bill/{self.product.pk}-vattenfall-2022/"
         response = self.client.get(url, HTTP_USER_AGENT=BOT_UA)
+        self.assertRedirects(response, self.url, status_code=301, fetch_redirect_response=False)
+
+    def test_a_slug_without_a_hyphen_after_the_id_is_a_404(self):
+        """`12abc` used to reach the view and hand `int()` a word - a 500 on a crawlable address."""
+
+        self.assertEqual(self.client.get("/en/germany/utility-bill/12abc/", HTTP_USER_AGENT=BOT_UA).status_code, 404)
+
+    def test_the_bare_id_still_resolves(self):
+        response = self.client.get(f"/en/germany/utility-bill/{self.product.pk}/", HTTP_USER_AGENT=BOT_UA)
         self.assertRedirects(response, self.url, status_code=301, fetch_redirect_response=False)
 
     def test_unknown_or_inactive_product_is_404(self):

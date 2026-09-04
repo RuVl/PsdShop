@@ -7,7 +7,7 @@ import IconTrash from '@/components/icons/IconTrash.vue';
 import {useCartStore} from '@/stores/cart.js';
 import {useCatalogStore} from '@/stores/catalog.js';
 
-// The cart itself lives in localStorage (ADR-0010) - this page is its view, drawn with the
+// The cart itself lives in localStorage (docs/architecture.md) - this page is its view, drawn with the
 // design's storefront classes. A line is a catalog card payload: no quantities, USD only.
 const route = useRoute();
 const cartStore = useCartStore();
@@ -17,7 +17,6 @@ const {cartItems, cartItemCount, totalPrice} = storeToRefs(cartStore);
 // rows, which is where the grid card reads them from too.
 const catalogStore = useCatalogStore();
 catalogStore.load();
-const typeNames = computed(() => Object.fromEntries(catalogStore.documentTypes.map(t => [t.slug, t.name])));
 // The line and its country row side by side: one lookup per line, not one per thing drawn from it.
 const lines = computed(() => cartItems.value.map(item => ({item, country: catalogStore.countryBySlug(item.country)})));
 
@@ -62,8 +61,8 @@ onMounted(async () => {
 
               <div class="cart__body">
                 <div class="cart__badges">
-                  <span v-if="typeNames[item.document_type]" class="badge text-small primary">
-                    {{ typeNames[item.document_type] }}
+                  <span v-if="catalogStore.typeNameBySlug(item.document_type)" class="badge text-small primary">
+                    {{ catalogStore.typeNameBySlug(item.document_type) }}
                   </span>
                   <span v-if="item.year" class="badge-year text-small">{{ item.year }}</span>
                 </div>

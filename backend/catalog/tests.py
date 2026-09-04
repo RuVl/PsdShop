@@ -16,7 +16,7 @@ from backend.urlspace import reserved_slugs
 from catalog.admin import ProductFileInput
 from catalog.models import IMAGE_FIELDS, IMAGE_VARIANTS, Country, DocumentType, Product, ProductImage
 from catalog.views import CatalogPagination
-from content.models import Page
+from content.models import Page, Slide
 from customer.models import Customer
 from sales.models import Order, OrderItem
 
@@ -241,7 +241,7 @@ class ProductFileTests(CatalogFactoryMixin, TestCase):
 
 
 class ProductAdminTests(CatalogFactoryMixin, TestCase):
-    """The change page renders a field whose storage refuses to build a URL (ADR-0001)."""
+    """The change page renders a field whose storage refuses to build a URL (docs/architecture.md)."""
 
     def setUp(self):
         super().setUp()
@@ -290,7 +290,7 @@ class ProductAdminTests(CatalogFactoryMixin, TestCase):
 
 
 class ProductDeletionTests(CatalogFactoryMixin, TestCase):
-    """A sold template has to stay downloadable, so the catalogue cannot drop it (ADR-0001)."""
+    """A sold template has to stay downloadable, so the catalogue cannot drop it (docs/architecture.md)."""
 
     def test_a_bought_product_cannot_be_deleted(self):
         product = self.make_product()
@@ -324,9 +324,30 @@ class ProductDeletionTests(CatalogFactoryMixin, TestCase):
         OrderItem.objects.create(order=order, product=product, product_name=product.name, unit_price=product.price)
 
         with self.assertRaises(CommandError) as caught:
-            call_command("seed_testdata", "--flush", "--images", "0", stdout=StringIO())
+            call_command("seed_testdata", "--flush", "--force", "--images", "0", stdout=StringIO())
 
         self.assertIn(str(order.pk), str(caught.exception))
+
+    def test_seeding_twice_refreshes_the_catalog_instead_of_doubling_it(self):
+        """Re-seeding is how a change to the fixtures is picked up, so it has to be re-runnable."""
+
+        call_command("seed_testdata", "--images", "0", stdout=StringIO())
+        counts = (Product.objects.count(), Country.objects.count(), Page.objects.count(), Slide.objects.count())
+
+        call_command("seed_testdata", "--images", "0", stdout=StringIO())
+
+        self.assertEqual(
+            (Product.objects.count(), Country.objects.count(), Page.objects.count(), Slide.objects.count()),
+            counts,
+        )
+
+    def test_flush_refuses_without_force_outside_debug(self):
+        """`make manage` reaches the production container, where --flush would wipe the content."""
+
+        with self.assertRaises(CommandError) as caught:
+            call_command("seed_testdata", "--flush", "--images", "0", stdout=StringIO())
+
+        self.assertIn("--force", str(caught.exception))
 
     def test_taking_a_product_off_the_shelf_is_a_flag(self):
         product = self.make_product()

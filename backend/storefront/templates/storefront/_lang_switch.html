@@ -1,5 +1,10 @@
 {% load i18n storefront %}
-{# A flag linking to the current page in the other language. Inline SVG: flag emoji are blank on Windows. #}
+{% comment %}
+    A flag linking to the current page in the other language. Inline SVG: flag emoji are blank on
+    Windows. `slot` makes the clipPath id unique - the header includes this twice (desktop and
+    mobile), and two elements sharing an id is invalid HTML: browsers resolve url(#id) to
+    whichever came first.
+{% endcomment %}
 {% get_current_language as current_lang %}
 {% get_available_languages as languages %}
 {% for code, name in languages %}{% if code != current_lang %}
@@ -12,8 +17,8 @@
     </svg>
     {% else %}
     <svg class="lang__flag" viewBox="0 0 60 30" width="28" height="18" role="img" aria-hidden="true">
-        <clipPath id="lang-gb-clip"><path d="M0,0 v30 h60 v-30 z"/></clipPath>
-        <g clip-path="url(#lang-gb-clip)">
+        <clipPath id="lang-gb-clip-{{ slot|default:'main' }}"><path d="M0,0 v30 h60 v-30 z"/></clipPath>
+        <g clip-path="url(#lang-gb-clip-{{ slot|default:'main' }})">
             <path d="M0,0 v30 h60 v-30 z" fill="#012169"/>
             <path d="M0,0 L60,30 M60,0 L0,30" stroke="#fff" stroke-width="6"/>
             <path d="M30,0 v30 M0,15 h60" stroke="#fff" stroke-width="10"/>

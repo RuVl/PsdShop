@@ -53,7 +53,7 @@
     <section class="shop mb-60">
         <div class="container">
             <div class="shop__body">
-                {% include "storefront/_sidebar.html" %}
+                {% include "storefront/_sidebar.html" with type_slug=type_slug query=query %}
 
                 <div class="shop__right-block">
                     <div class="text black">{% translate "Product list" %}</div>
@@ -63,16 +63,32 @@
                             {% if selected_type %} — {{ selected_type.name }}{% endif %}
                         </h2>
 
+                        {% comment %}
+                            The same free-text filter the SPA has (views/Catalog.vue). Without it a
+                            crawler has no way to reach a `?q=` address and the two presentations
+                            would not offer the same page.
+                        {% endcomment %}
+                        <form class="products-search" method="get" action="{{ request.path }}" role="search">
+                            <label class="text-small black" for="product-search">{% translate "Search" %}</label>
+                            <input id="product-search" type="search" name="q" value="{{ query }}"
+                                   placeholder="{% translate "Search by name" %}">
+                            <button class="btn btn-solid" type="submit">{% translate "Search" %}</button>
+                        </form>
+
                         <div class="filter-products">
                             <div class="text-small black">{% translate "Filter products" %}</div>
                             <div class="filter-products-content">
                                 <div class="filter-products-right">
                                     <div class="filter-products-card-list">
+                                        {% comment %}
+                                            A facet link keeps `?q=` and drops `page` - the rule
+                                            catalogTarget() follows in views/Catalog.vue.
+                                        {% endcomment %}
                                         <a class="filter-products-card-list-item filter-products-btn {% if not selected_type %}current{% endif %}"
-                                           href="{% url 'storefront:catalog' country=country_slug doctype='all' %}">{% translate "All categories" %}</a>
+                                           href="{% url 'storefront:catalog' country=country_slug doctype='all' %}{% if query %}?q={{ query|urlencode }}{% endif %}">{% translate "All categories" %}</a>
                                         {% for dtype in document_types %}
                                         <a class="filter-products-card-list-item filter-products-btn {% if dtype == selected_type %}current{% endif %}"
-                                           href="{% url 'storefront:catalog' country=country_slug doctype=dtype.slug %}">{{ dtype.name }}</a>
+                                           href="{% url 'storefront:catalog' country=country_slug doctype=dtype.slug %}{% if query %}?q={{ query|urlencode }}{% endif %}">{{ dtype.name }}</a>
                                         {% endfor %}
                                     </div>
                                 </div>
@@ -96,11 +112,13 @@
                         <nav class="pagination" aria-label="{% translate "Catalog pages" %}">
                             {% if page_obj.has_previous %}
                                 {% comment %}
-                                    Page 1 is the listing's own address, without a parameter - the
-                                    URL `canonical` prints and the SPA links.
+                                    Page 1 is the listing's own address, without a `page` parameter
+                                    - the URL `canonical` prints and the SPA links. An active `?q=`
+                                    rides along on every one of these, so the crawler walks the
+                                    same filtered set the reader does.
                                 {% endcomment %}
                                 <a class="btn btn-ghost pagination__step" rel="prev"
-                                   href="{% if page_obj.previous_page_number == 1 %}{{ request.path }}{% else %}?page={{ page_obj.previous_page_number }}{% endif %}"
+                                   href="{% if page_obj.previous_page_number == 1 %}{{ request.path }}{% if query %}?q={{ query|urlencode }}{% endif %}{% else %}{% querystring page=page_obj.previous_page_number %}{% endif %}"
                                    aria-label="{% translate "Previous page" %}">&lsaquo;</a>
                             {% endif %}
                             {% for number in page_range %}
@@ -108,15 +126,15 @@
                                     <span class="pagination__gap" aria-hidden="true">{{ number }}</span>
                                 {% elif number == page_obj.number %}
                                     <a class="btn btn-solid pagination__page" aria-current="page"
-                                       href="{% if number == 1 %}{{ request.path }}{% else %}?page={{ number }}{% endif %}">{{ number }}</a>
+                                       href="{% if number == 1 %}{{ request.path }}{% if query %}?q={{ query|urlencode }}{% endif %}{% else %}{% querystring page=number %}{% endif %}">{{ number }}</a>
                                 {% else %}
                                     <a class="btn btn-ghost pagination__page"
-                                       href="{% if number == 1 %}{{ request.path }}{% else %}?page={{ number }}{% endif %}">{{ number }}</a>
+                                       href="{% if number == 1 %}{{ request.path }}{% if query %}?q={{ query|urlencode }}{% endif %}{% else %}{% querystring page=number %}{% endif %}">{{ number }}</a>
                                 {% endif %}
                             {% endfor %}
                             {% if page_obj.has_next %}
                                 <a class="btn btn-ghost pagination__step" rel="next"
-                                   href="?page={{ page_obj.next_page_number }}"
+                                   href="{% querystring page=page_obj.next_page_number %}"
                                    aria-label="{% translate "Next page" %}">&rsaquo;</a>
                             {% endif %}
                         </nav>

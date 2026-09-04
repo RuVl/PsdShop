@@ -9,6 +9,7 @@ a product with no year, an inactive product and a country with nothing in it.
 from decimal import Decimal
 from io import BytesIO
 
+from django.conf import settings
 from django.core.files.base import ContentFile
 from django.core.management.base import BaseCommand, CommandError
 from django.db.models import ProtectedError
@@ -70,16 +71,31 @@ class Command(BaseCommand):
 
     def add_arguments(self, parser):
         parser.add_argument("--flush", action="store_true", help="Wipe the catalog first.")
+        parser.add_argument(
+            "--force",
+            action="store_true",
+            help="Allow --flush outside DEBUG. `make manage` runs in the production container.",
+        )
         parser.add_argument("--images", type=int, default=2, help="Images per product (0 skips them).")
 
     @atomic
     def handle(self, *args, **options):
         if options["flush"]:
+            # --flush drops the countries, document types, pages and slides the owner writes, not
+            # just the generated ones. `make manage` reaches the production container, so outside
+            # DEBUG it takes a second, explicit word. The test runner forces DEBUG=False, which is
+            # why the gate is a flag and not DEBUG alone.
+            if not settings.DEBUG and not options["force"]:
+                raise CommandError(
+                    "--flush deletes every country, document type, page and slide, and DEBUG is "
+                    "off - this looks like a production database. Add --force if you mean it."
+                )
+
             try:
                 deleted = Product.objects.all().delete()
             except ProtectedError as error:
                 # A sold product cannot be deleted - `OrderItem.product` is PROTECT, so the file
-                # outlives the sale (ADR-0001). Say that instead of dumping the traceback.
+                # outlives the sale (docs/architecture.md). Say that instead of dumping the traceback.
                 sold = {item.order_id for item in error.protected_objects}
                 raise CommandError(
                     f"Some products have been sold and cannot be deleted (orders: {sorted(sold)}). "
@@ -92,27 +108,34 @@ class Command(BaseCommand):
             Slide.objects.all().delete()
             self.stdout.write(f"Flushed existing catalog: {deleted}")
 
+        # `update_or_create` keyed on the slug, so a second run without --flush refreshes the rows
+        # instead of raising on the unique constraint - re-seeding is the normal way to pick up a
+        # change to the fixtures above.
         countries = {
-            slug: Country.objects.create(
-                code=code,
+            slug: Country.objects.update_or_create(
                 slug=slug,
-                name_en=names[0],
-                name_ru=names[1],
-                is_popular=popular,
-                position=index,
-                seo_text_en=f"Document templates for {names[0]}: utility bills, bank statements and tax papers.",
-                seo_text_ru=f"Шаблоны документов: {names[1]}. Коммунальные счета, выписки и налоговые справки.",
-            )
+                defaults={
+                    "code": code,
+                    "name_en": names[0],
+                    "name_ru": names[1],
+                    "is_popular": popular,
+                    "position": index,
+                    "seo_text_en": (
+                        f"Document templates for {names[0]}: utility bills, bank statements and tax papers."
+                    ),
+                    "seo_text_ru": (
+                        f"Шаблоны документов: {names[1]}. Коммунальные счета, выписки и налоговые справки."
+                    ),
+                },
+            )[0]
             for index, (code, slug, names, popular) in enumerate(COUNTRIES)
         }
 
         types = {
-            slug: DocumentType.objects.create(
+            slug: DocumentType.objects.update_or_create(
                 slug=slug,
-                name_en=names[0],
-                name_ru=names[1],
-                position=index,
-            )
+                defaults={"name_en": names[0], "name_ru": names[1], "position": index},
+            )[0]
             for index, (slug, names, _issuer) in enumerate(TYPES)
         }
 
@@ -124,7 +147,7 @@ class Command(BaseCommand):
             for type_index, (type_slug, type_names, issuer) in enumerate(TYPES):
                 for year_index, year in enumerate(YEARS):
                     price = Decimal("15.00") + Decimal(country_index * 7 + type_index * 5 + year_index)
-                    product = self._create_product(
+                    product, created = self._create_product(
                         country=countries[country_slug],
                         document_type=types[type_slug],
                         country_names=country_names,
@@ -133,7 +156,8 @@ class Command(BaseCommand):
                         year=year,
                         price=price,
                     )
-                    self._add_images(product, options["images"])
+                    if created:
+                        self._add_images(product, options["images"])
                     products += 1
 
         products += self._create_edge_cases(countries, types, options["images"])
@@ -210,7 +234,10 @@ class Command(BaseCommand):
             },
         ]
         for position, slide in enumerate(slides):
-            Slide.objects.create(position=position, image=self._slide_image(position), **slide)
+            Slide.objects.update_or_create(
+                position=position,
+                defaults={"image": self._slide_image(position), **slide},
+            )
 
         settings_row = SiteSettings.load()
         settings_row.support_url = "https://t.me/example"
@@ -240,19 +267,30 @@ class Command(BaseCommand):
         name_ru = overrides.pop("name_ru", f"{country_names[1]}: {type_names[1]} ({issuer[1]}) {year}")
         slug = overrides.pop("slug", f"{country.slug}-{document_type.slug}-{year}")
 
-        return Product.objects.create(
+        # Keyed on the slug like every other row here, so a second run refreshes the catalog
+        # rather than doubling it. `Product.slug` is not unique on its own - a country and a type
+        # are part of the address - so all three go into the lookup.
+        product, created = Product.objects.update_or_create(
             country=country,
             document_type=document_type,
-            year=year,
-            price=price,
             slug=slug,
-            name_en=name_en,
-            name_ru=name_ru,
-            description_en=DESCRIPTION_EN.format(type=type_names[0].lower(), country=country_names[0], year=year),
-            description_ru=DESCRIPTION_RU.format(type=type_names[1].lower(), country=country_names[1], year=year),
-            file=ContentFile(PLACEHOLDER_FILE, name=f"{slug}.psd"),
-            **overrides,
+            defaults={
+                "year": year,
+                "price": price,
+                "name_en": name_en,
+                "name_ru": name_ru,
+                "description_en": DESCRIPTION_EN.format(
+                    type=type_names[0].lower(), country=country_names[0], year=year
+                ),
+                "description_ru": DESCRIPTION_RU.format(
+                    type=type_names[1].lower(), country=country_names[1], year=year
+                ),
+                "file": ContentFile(PLACEHOLDER_FILE, name=f"{slug}.psd"),
+                **overrides,
+            },
         )
+
+        return product, created
 
     def _create_edge_cases(self, countries, types, images: int) -> int:
         """The rows that break layouts: a very long name, extreme prices, no year, hidden."""
@@ -297,15 +335,23 @@ class Command(BaseCommand):
         ]
 
         for case in cases:
-            product = Product.objects.create(
+            fields = dict(case)
+            slug = fields.pop("slug")
+            product, created = Product.objects.update_or_create(
                 country=germany,
                 document_type=utility,
-                description_en="Edge case for manual testing.",
-                description_ru="Крайний случай для ручного тестирования.",
-                file=ContentFile(PLACEHOLDER_FILE, name=f"{case['slug']}.psd"),
-                **case,
+                slug=slug,
+                defaults={
+                    "description_en": "Edge case for manual testing.",
+                    "description_ru": "Крайний случай для ручного тестирования.",
+                    "file": ContentFile(PLACEHOLDER_FILE, name=f"{slug}.psd"),
+                    **fields,
+                },
             )
-            self._add_images(product, images)
+            # Only a new row gets pictures: re-running would otherwise stack another gallery onto
+            # every product, which is not what "re-seed to pick up a change" should mean.
+            if created:
+                self._add_images(product, images)
 
         return len(cases)
 

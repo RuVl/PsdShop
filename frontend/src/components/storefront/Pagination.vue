@@ -1,7 +1,7 @@
 <script setup>
 import {computed} from 'vue';
 
-// Numbered pages, the same set the bot page renders at the same addresses (ADR-0010). Real links,
+// Numbered pages, the same set the bot page renders at the same addresses (docs/architecture.md). Real links,
 // so a middle click opens a page in a tab and a crawler walks them.
 const props = defineProps({
     page: {type: Number, required: true},

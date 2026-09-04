@@ -1,7 +1,6 @@
 <script setup>
-import {computed, ref} from 'vue';
+import {computed} from 'vue';
 import {useRoute} from 'vue-router';
-import CheckoutModal from '@/components/storefront/CheckoutModal.vue';
 import IconCart from '@/components/icons/IconCart.vue';
 import {useCartStore} from '@/stores/cart.js';
 
@@ -11,6 +10,10 @@ const props = defineProps({
     product: {type: Object, required: true},
     typeName: {type: String, default: ''},
 });
+
+// Buying is announced, not handled here: one checkout modal lives in the listing. A modal per
+// card meant a hundred of them on a full page, each with its own stores and watchers.
+const emit = defineEmits(['buy']);
 
 const route = useRoute();
 const cart = useCartStore();
@@ -22,9 +25,6 @@ const inCart = computed(() => cart.inCart(props.product.id));
 function addToCart() {
     cart.addItem(props.product);
 }
-
-// Express checkout: one template, paid for without ever entering the cart.
-const buying = ref(false);
 </script>
 
 <template>
@@ -48,15 +48,13 @@ const buying = ref(false);
         <div class="product-item-prop-content"><span class="product-item-prop-value">{{ product.priceLabel }}</span></div>
       </div>
       <div class="product-item-controls">
-        <button class="button" type="button" @click="buying = true">{{ $t('buttons.buy_now') }}</button>
+        <button class="button" type="button" @click="emit('buy', product)">{{ $t('buttons.buy_now') }}</button>
         <button class="button button-cart" type="button" :disabled="inCart"
                 :title="inCart ? $t('storefront.card.in_cart') : $t('buttons.add2cart')" @click="addToCart">
           <IconCart size="small"/>
         </button>
       </div>
     </div>
-
-    <CheckoutModal v-model:open="buying" :product="product"/>
   </div>
 </template>
 

@@ -47,9 +47,17 @@ async function load() {
 watch(() => route.params.productSlug, load, {immediate: true});
 onBeforeUnmount(() => lightbox?.destroy());
 
+// Built from the product, not from the address it was reached at. Django 301s a wrong facet to
+// the canonical one (storefront/views.py), but a client-side navigation does not, so the
+// breadcrumb and the sidebar could otherwise point at a listing this product is not in.
+const facet = computed(() => ({
+    country: product.value?.country || route.params.country,
+    type: product.value?.document_type || route.params.type,
+}));
+
 const listingTarget = computed(() => ({
     name: 'catalog',
-    params: {lang: lang.value, country: route.params.country, type: route.params.type},
+    params: {lang: lang.value, country: facet.value.country, type: facet.value.type},
 }));
 
 function addToCart() {
@@ -81,7 +89,7 @@ const buying = ref(false);
             </li>
             <li>
               <router-link :to="listingTarget">
-                <span>{{ productCountry ? productCountry.name : route.params.country }}<template v-if="productType"> — {{ productType.name }}</template></span>
+                <span>{{ productCountry ? productCountry.name : facet.country }}<template v-if="productType"> — {{ productType.name }}</template></span>
               </router-link>
             </li>
             <li><span>{{ product.name }}</span></li>
@@ -92,7 +100,7 @@ const buying = ref(false);
       <section class="shop mb-100">
         <div class="container">
           <div class="shop__body">
-            <CountrySidebar :country-slug="route.params.country" :type-slug="route.params.type"/>
+            <CountrySidebar :country-slug="facet.country" :type-slug="facet.type"/>
 
             <div class="shop__right-block">
               <div class="text black">{{ $t('storefront.product.title') }}</div>

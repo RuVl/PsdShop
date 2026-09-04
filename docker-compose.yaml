@@ -60,6 +60,9 @@ services:
       context: .
       dockerfile: backend/Dockerfile
     restart: unless-stopped
+    # Keeps the container id out of logs and out of the SMTP EHLO greeting. Mail also pins its own
+    # name via EMAIL_FQDN (settings.py), so this is not what protects Message-ID.
+    hostname: psd-shop.pro
     volumes:
       - products_volume:/app/products
       - static_volume:/app/static

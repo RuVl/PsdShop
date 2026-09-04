@@ -16,7 +16,7 @@ from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.utils.translation import gettext_lazy as _
 
-# Segments the site answers on by itself, from the URL map in docs/plan.md. The pages the owner
+# Segments the site answers on by itself, from the URL map in docs/architecture.md. The pages the owner
 # writes - `info`, `contacts` - are deliberately absent: those are `content.Page` rows, not fixed
 # routes, and reserving them here would forbid creating the very pages they stand for.
 SERVICE_SLUGS = frozenset(

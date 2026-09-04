@@ -25,6 +25,7 @@ from backend.testing import TempUploadsMixin
 from catalog.models import Country, DocumentType, Product
 from customer.models import Customer
 from sales.models import Order, OrderItem, PaymentCallbackLog, Transaction
+from sales.plisio import apply_order_status
 from sales.utils import send_purchases_link
 
 
@@ -676,6 +677,32 @@ class CheckoutReuseTests(SalesFactoryMixin, TestCase):
 
         self.assertEqual(response.data["redirect_url"], "https://plisio.net/other")
 
+    def test_a_paid_order_pushed_back_to_pending_is_not_reused(self):
+        """`cancelled duplicate` maps to PENDING, so status alone cannot tell a paid order apart."""
+
+        self.first_checkout()
+        order = Order.objects.get(customer__email="new@example.com")
+        order.mark_paid()
+        apply_order_status(order, "cancelled duplicate")
+        order.refresh_from_db()
+        self.assertEqual(order.status, Order.OrderStatus.PENDING)
+        self.assertIsNotNone(order.paid_at)
+
+        response = self.second_checkout()
+
+        self.assertEqual(response.data["redirect_url"], "https://plisio.net/second")
+        self.assertEqual(Order.objects.filter(customer__email="new@example.com").count(), 2)
+
+    def test_a_cancelled_order_is_not_reused_inside_the_window(self):
+        """Plisio has already killed that invoice, however fresh the timestamps are."""
+
+        self.first_checkout()
+        Order.objects.filter(customer__email="new@example.com").update(status=Order.OrderStatus.CANCELLED)
+
+        self.second_checkout()
+
+        self.assertEqual(Order.objects.filter(customer__email="new@example.com").count(), 2)
+
     def test_a_failed_invoice_leaves_nothing_to_reuse(self):
         with (
             patch("sales.views.requests.get", return_value=CheckoutTests.plisio_error()),
@@ -949,7 +976,7 @@ class CartItemsTests(SalesFactoryMixin, TestCase):
         self.assertEqual(response.data, [])
 
     def test_both_languages_ride_along(self):
-        """No `?lang=` anywhere in the API (ADR-0010): every visitor gets the same payload."""
+        """No `?lang=` anywhere in the API (docs/architecture.md): every visitor gets the same payload."""
 
         self.product.name_ru = "Счёт за коммуналку"
         self.product.save(update_fields=["name_ru"])

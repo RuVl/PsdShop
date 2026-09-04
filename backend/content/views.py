@@ -17,7 +17,7 @@ class PageListView(ListAPIView):
     serializer_class = PageListSerializer
 
     def get_queryset(self):
-        return Page.objects.filter(is_published=True).exclude(slug=Page.HOME)
+        return Page.objects.menu()
 
 
 class PageDetailView(RetrieveAPIView):
@@ -27,7 +27,7 @@ class PageDetailView(RetrieveAPIView):
     lookup_field = "slug"
 
     def get_queryset(self):
-        return Page.objects.filter(is_published=True)
+        return Page.objects.published()
 
 
 class SlideListView(ListAPIView):

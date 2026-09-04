@@ -41,13 +41,20 @@ def build_meta(
     og_image: str | None = None,
     ld: dict | None = None,
     noindex: bool = False,
+    max_page: int | None = None,
 ) -> dict:
     path = request.path
     canonical = absolute_url(path, request)
-    # Pagination canonicalizes to itself; every other query parameter (filters) drops off.
+    # Pagination canonicalizes to itself; every other query parameter (filters, `?q=`) drops off.
+    # An out-of-range number canonicalizes to the last real page instead of to itself: the view
+    # clamps with `Paginator.get_page` and the SPA lands on the last page, so `?page=999` renders
+    # the same thing as `?page=<last>` and a self-canonical there would mint an endless supply of
+    # duplicates.
     page = request.GET.get("page")
     if page and page.isdigit() and int(page) > 1:
-        canonical += f"?page={int(page)}"
+        number = min(int(page), max_page) if max_page else int(page)
+        if number > 1:
+            canonical += f"?page={number}"
 
     return {
         "title": title,
@@ -80,28 +87,45 @@ def x_default(path: str, request: HttpRequest | None) -> tuple[str, str]:
     return "x-default", absolute_url(default.replace(f"/{settings.LANGUAGE_CODE}/", "/", 1), request)
 
 
-def catalog_meta(request: HttpRequest, country=None, doctype=None, home_page=None) -> dict:
-    """Meta for the home page and the country/type listings."""
+def catalog_meta(request: HttpRequest, country=None, doctype=None, home_page=None, paginator=None) -> dict:
+    """Meta for the home page and the country/type listings.
+
+    `paginator` is what lets the canonical clamp an out-of-range `?page=`; without it the number is
+    taken at face value.
+    """
+
+    max_page = paginator.num_pages if paginator else None
 
     selected = [obj for obj in (country, doctype) if obj is not None]
     if not selected:
         # The front page may carry its own meta on the `home` content.Page row.
         title = (home_page.meta_title if home_page else "") or site_name()
         description = home_page.meta_description if home_page else ""
-        return build_meta(request, title=title, description=description)
+        return build_meta(request, title=title, description=description, max_page=max_page)
 
     # A single-facet page may carry its own meta from the admin; combined pages are generated.
     title = selected[0].meta_title if len(selected) == 1 and selected[0].meta_title else ""
     title = title or f"{' — '.join(obj.name for obj in selected)} | {site_name()}"
     description = next((obj.meta_description for obj in selected if obj.meta_description), "")
-    return build_meta(request, title=title, description=description)
+    return build_meta(request, title=title, description=description, max_page=max_page)
+
+
+def snippet(text: str) -> str:
+    """Body text as a meta description: tags out, thirty words.
+
+    One rule for every page that falls back to its own copy. Only `content.Page.body` is edited
+    through the HTML editor today, but a description with markup in it is a snippet with markup in
+    it, and the next field to get a rich widget should not have to remember this.
+    """
+
+    return Truncator(strip_tags(text or "")).words(30)
 
 
 def product_meta(request: HttpRequest, product) -> dict:
     """Meta for a product page, ld+json Product/Offer and BreadcrumbList included."""
 
     title = product.meta_title or f"{product.name} | {site_name()}"
-    description = product.meta_description or Truncator(product.description).words(30) or ""
+    description = product.meta_description or snippet(product.description)
 
     images = [absolute_url(image.page.url, request) for image in product.images.all() if image.page]
     canonical_path = request.path
@@ -162,7 +186,7 @@ def page_meta(request: HttpRequest, page) -> dict:
     """Meta for an owner-written text page (content.Page)."""
 
     title = page.meta_title or f"{page.title} | {site_name()}"
-    description = page.meta_description or Truncator(strip_tags(page.body)).words(30)
+    description = page.meta_description or snippet(page.body)
     return build_meta(request, title=title, description=description)
 
 
@@ -173,4 +197,6 @@ def service_meta(request: HttpRequest) -> dict:
 
 
 def render_meta(meta: dict) -> str:
-    return mark_safe(render_to_string("storefront/_meta.html", {"meta": meta}))  # noqa: S308
+    # `render_to_string` already hands back a SafeString - the values inside were escaped as the
+    # template rendered them, which is the whole point of rendering them there.
+    return render_to_string("storefront/_meta.html", {"meta": meta})

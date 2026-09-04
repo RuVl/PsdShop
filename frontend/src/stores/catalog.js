@@ -15,6 +15,8 @@ export const useCatalogStore = defineStore('catalog', {
         // on the country row. The cart lines are what read it: they draw a product the grid never
         // handed them, straight out of localStorage (views/Cart.vue).
         countryBySlug: state => slug => state.countries.find(country => country.slug === slug) || null,
+        // The same shape for the type badge, which the grid and the cart both draw from a slug.
+        typeNameBySlug: state => slug => state.documentTypes.find(type => type.slug === slug)?.name || '',
     },
     actions: {
         async load() {

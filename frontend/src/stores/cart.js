@@ -3,7 +3,7 @@ import {fetchCartItems} from '@/api/order.js';
 import Product from '@/models/Product.js';
 
 // A cart line is a product payload from the catalog API (both languages ride along). A product
-// is a template sold any number of times, but an order holds it at most once (ADR-0001), so
+// is a template sold any number of times, but an order holds it at most once (docs/architecture.md), so
 // there are no quantities - the cart is a set.
 export const useCartStore = defineStore('cart', {
     state: () => ({

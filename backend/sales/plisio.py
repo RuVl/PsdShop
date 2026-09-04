@@ -89,7 +89,7 @@ def apply_order_status(order: Order, plisio_status: str | None) -> tuple[bool, l
 
     Returns (this is the first payment, lines delivered) - the caller decides about the e-mail,
     because only the first payment may send one. An expired or cancelled invoice only moves the
-    status: with unlimited copies there is nothing to give back (ADR-0001).
+    status: with unlimited copies there is nothing to give back (docs/architecture.md).
     """
 
     order.status = STATUS_MAP.get(plisio_status, Order.OrderStatus.ERROR)

@@ -1,15 +1,17 @@
 <script setup>
-import {computed, nextTick, ref, watch} from 'vue';
+import {computed, nextTick, onBeforeUnmount, ref, watch} from 'vue';
 import {useRoute, useRouter} from 'vue-router';
 import CountrySidebar from '@/components/storefront/CountrySidebar.vue';
 import Pagination from '@/components/storefront/Pagination.vue';
 import ProductCard from '@/components/storefront/ProductCard.vue';
+import CheckoutModal from '@/components/storefront/CheckoutModal.vue';
 import Banner from '@/components/storefront/Banner.vue';
 import IconCross from '@/components/icons/IconCross.vue';
 import IconSearch from '@/components/icons/IconSearch.vue';
 import {fetchProducts} from '@/api/catalog.js';
 import {fetchPage} from '@/api/content.js';
 import {useCatalogStore} from '@/stores/catalog.js';
+import {useCatalogLinks} from '@/composables/useCatalogLinks.js';
 
 // The home page and every country/type listing - the SPA presentation of the same URLs the
 // bot pages render (storefront/catalog.html). Markup per design/index.html.
@@ -19,10 +21,9 @@ const catalogStore = useCatalogStore();
 
 catalogStore.load();
 
-const lang = computed(() => route.params.lang || 'en');
+const {lang, searchQuery, catalogTarget} = useCatalogLinks();
 const countrySlug = computed(() => route.params.country || 'all');
 const typeSlug = computed(() => route.params.type || 'all');
-const searchQuery = computed(() => route.query.q || '');
 
 const isHome = computed(() => countrySlug.value === 'all' && typeSlug.value === 'all');
 const isFiltered = computed(() => !isHome.value);
@@ -30,12 +31,14 @@ const isFiltered = computed(() => !isHome.value);
 const selectedCountry = computed(() => catalogStore.countries.find(c => c.slug === countrySlug.value) || null);
 const selectedType = computed(() => catalogStore.documentTypes.find(t => t.slug === typeSlug.value) || null);
 
-// The owner-written SEO block of the front page (the `home` content.Page row).
+// The owner-written SEO block of the front page (the `home` content.Page row). A failure is
+// swallowed on purpose and this is the only place in the storefront where that is true: the block
+// is decorative, it is absent on most listings anyway, and a row the owner never wrote 404s here -
+// so "failed" and "empty" genuinely render the same thing.
 const homePage = ref(null);
 watch(isHome, async (home) => {
     if (home && !homePage.value) homePage.value = await fetchPage('home').catch(() => null);
 }, {immediate: true});
-const typeNames = computed(() => Object.fromEntries(catalogStore.documentTypes.map(t => [t.slug, t.name])));
 
 // Grid state: loading, failed and empty must never look alike.
 const products = ref([]);
@@ -76,7 +79,13 @@ function pageRoute(number) {
     return {query};
 }
 
+// Which load is allowed to write to the grid. Two fast page clicks, or a debounced search landing
+// on top of a facet link, leave two requests in flight; without this the slower one wins and the
+// grid ends up showing something the address bar does not describe.
+let latestLoad = 0;
+
 async function load() {
+    const token = ++latestLoad;
     state.value = 'loading';
     notFound.value = false;
 
@@ -84,29 +93,33 @@ async function load() {
     const target = page.value;
     try {
         const data = await fetchProducts({...facet, page: target});
+        if (token !== latestLoad) return;
         products.value = data.results;
         totalPages.value = data.totalPages;
         state.value = 'ready';
         await nextTick();
         scrollToGrid();
     } catch (error) {
+        if (token !== latestLoad) return;
         if (error.response?.status !== 404) state.value = 'failed';
         // A 404 is either an unknown country/type slug or a page past the end of a real listing.
         else if (target === 1) notFound.value = true;
-        else await landOnLastPage(facet, target);
+        else await landOnLastPage(facet, target, token);
     }
 }
 
 // Page 1 tells the two 404s apart: if it answers, the listing exists and the reader simply
 // overshot - correct the address to the last real page, which loads it through the watcher.
-async function landOnLastPage(facet, target) {
+async function landOnLastPage(facet, target, token) {
     try {
         const {totalPages: last} = await fetchProducts({...facet, page: 1});
+        if (token !== latestLoad) return;
         // Same page number means the catalog grew between the two requests; there is nothing to
         // correct and no new address to reload from, so say the load failed rather than spin.
         if (last === target) state.value = 'failed';
         else router.replace(pageRoute(Math.max(1, last)));
     } catch (error) {
+        if (token !== latestLoad) return;
         if (error.response?.status === 404) notFound.value = true;
         else state.value = 'failed';
     }
@@ -134,6 +147,15 @@ function scrollToGrid() {
 
 watch(() => gridKey(), load, {immediate: true});
 
+// Express checkout: one modal for the whole grid, holding whichever card asked to buy.
+const buyingProduct = ref(null);
+const buyingOpen = computed({
+    get: () => buyingProduct.value !== null,
+    set: value => {
+        if (!value) buyingProduct.value = null;
+    },
+});
+
 // The search lives in the URL (`?q=`), and the URL is what the grid loads from - the field below
 // is only the way a reader edits it.
 const queryInput = ref(searchQuery.value);
@@ -157,6 +179,10 @@ watch(queryInput, value => {
     searchTimer = setTimeout(() => pushQuery(value), 300);
 });
 
+// Without this the last keystroke fires up to 300ms after the reader has left the catalog, and
+// `router.replace` rewrites the query of whatever route is open by then.
+onBeforeUnmount(() => clearTimeout(searchTimer));
+
 // Back/forward, a facet change and the reset chip all arrive here.
 watch(searchQuery, value => {
     if (value !== queryInput.value.trim()) queryInput.value = value;
@@ -171,14 +197,6 @@ function onSearchIcon() {
         pushQuery('');
     }
     searchInput.value?.focus();
-}
-
-// Every facet link carries the search over: choosing a country is narrowing the same search, not
-// starting again. `page` is deliberately dropped - a new selection starts at its first page.
-function catalogTarget(country, type) {
-    const query = searchQuery.value ? {q: searchQuery.value} : {};
-    if (country === 'all' && type === 'all') return {name: 'home', params: {lang: lang.value}, query};
-    return {name: 'catalog', params: {lang: lang.value, country, type}, query};
 }
 </script>
 
@@ -228,6 +246,9 @@ function catalogTarget(country, type) {
                 <div class="text-small black">{{ $t('storefront.filter.title') }}</div>
                 <div class="filter-products-content">
                   <div class="filter-products-right">
+                    <p v-if="catalogStore.failed" class="text-small black">
+                      {{ $t('storefront.sidebar.failed') }}
+                    </p>
                     <div class="filter-products-card-list">
                       <router-link class="filter-products-card-list-item filter-products-btn"
                                    :class="{current: typeSlug === 'all'}" :to="catalogTarget(countrySlug, 'all')">
@@ -249,7 +270,8 @@ function catalogTarget(country, type) {
               <template v-else>
                 <div ref="grid" class="products-list">
                   <ProductCard v-for="product in products" :key="product.id" :product="product"
-                               :type-name="typeNames[product.document_type] || ''"/>
+                               :type-name="catalogStore.typeNameBySlug(product.document_type)"
+                               @buy="buyingProduct = $event"/>
                   <p v-if="!products.length" class="text black">{{ $t('storefront.grid.empty') }}</p>
                 </div>
 
@@ -261,7 +283,10 @@ function catalogTarget(country, type) {
       </div>
     </section>
 
-    <section v-if="selectedCountry?.seo_text_en || selectedType?.seo_text_en || (isHome && homePage)"
+    <!-- Gated on the localised getter, not on `seo_text_en`: a country written up in Russian only
+         would otherwise show this block to a crawler on /ru/ and to nobody else - a divergence
+         between the two presentations, which is what the bot template is judged against. -->
+    <section v-if="selectedCountry?.seo_text || selectedType?.seo_text || (isHome && homePage)"
              class="seo mb-60" id="seo">
       <div class="container">
         <div class="idesc">
@@ -272,6 +297,12 @@ function catalogTarget(country, type) {
         </div>
       </div>
     </section>
+
+    <!-- One instance for the whole grid; the card that was clicked is what it holds. Mounted
+         always, never behind a `v-if`: the modal arms its Escape handler and the scroll lock from
+         a watcher on `open`, which never fires if the component appears already open. Its own
+         markup is `v-if="open"`, so a closed one renders nothing. -->
+    <CheckoutModal v-model:open="buyingOpen" :product="buyingProduct"/>
   </main>
 </template>
 

@@ -2,6 +2,7 @@ from datetime import timedelta
 from pathlib import Path
 
 import environ
+from django.core.mail.utils import DNS_NAME
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -15,9 +16,12 @@ ALLOWED_HOSTS = env.list("ALLOWED_HOSTS")
 CORS_ALLOWED_ORIGINS = env.list("CORS_ALLOWED_ORIGINS")
 CSRF_TRUSTED_ORIGINS = env.list("CSRF_TRUSTED_ORIGINS")
 
-# Development settings
-if DEBUG:
-    SITE_ID = 1
+# The one site row every absolute URL is built from (backend/sites.py). Pinning it by id rather
+# than resolving by Host is what lets the admin open on a fresh deploy: without it Django looks the
+# site up by the request's host, 500s when no row matches, and the row can only be created in the
+# admin that just refused to open. storefront/migrations guarantees the row exists; its domain is
+# the owner's to set, and a system check complains while it is still the placeholder.
+SITE_ID = 1
 
 # Production settings
 if not DEBUG:
@@ -100,7 +104,7 @@ SITE_SCHEME = env("SITE_SCHEME", default="https")
 PURCHASES_PAGE_TTL = timedelta(hours=24)  # Customer.access_token
 DOWNLOAD_TTL = timedelta(hours=24)  # OrderItem.token
 
-# Checkout limit. Nothing is reserved (ADR-0001), but every checkout costs a Plisio invoice, so a
+# Checkout limit. Nothing is reserved (docs/architecture.md), but every checkout costs a Plisio invoice, so a
 # single request must not be able to ask for the whole catalogue.
 MAX_ORDER_ITEMS = 25
 
@@ -245,6 +249,11 @@ EMAIL_HOST = EMAIL_CONFIG.get("EMAIL_HOST")
 EMAIL_PORT = EMAIL_CONFIG.get("EMAIL_PORT")
 
 DEFAULT_FROM_EMAIL = env.get_value("DEFAULT_FROM_EMAIL", default=EMAIL_HOST_USER)
+
+# Django stamps Message-ID and the SMTP EHLO greeting with socket.getfqdn(), which leaks the
+# machine or container hostname into every delivered message. Pin it to the sender domain.
+EMAIL_FQDN = env.get_value("EMAIL_FQDN", default=(DEFAULT_FROM_EMAIL or "").rpartition("@")[2] or "localhost")
+DNS_NAME._fqdn = EMAIL_FQDN
 
 EMAIL_BACKEND = EMAIL_CONFIG.get("EMAIL_BACKEND")
 EMAIL_USE_TLS = EMAIL_CONFIG.get("EMAIL_USE_TLS", False)

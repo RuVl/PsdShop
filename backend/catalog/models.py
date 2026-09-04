@@ -3,7 +3,7 @@ from typing import TYPE_CHECKING
 
 from django.core.files.base import ContentFile
 from django.db import models
-from django.db.models import Count, Q
+from django.db.models import Count, F, Q
 from django.db.models.signals import post_delete
 from django.dispatch import receiver
 from django.utils.translation import gettext_lazy as _
@@ -79,6 +79,15 @@ class Country(MetaTagsMixin):
 class DocumentTypeQuerySet(models.QuerySet):
     def with_product_counts(self) -> "DocumentTypeQuerySet":
         return self.annotate(products_count=Count("products", filter=Q(products__is_active=True)))
+
+    def non_empty(self) -> "DocumentTypeQuerySet":
+        """The filter chips: a type nobody can buy anything of is a dead end on the page.
+
+        Named the same as `CountryQuerySet.non_empty` on purpose - the asymmetry is what had the
+        API, the bot page and the sitemap each spelling this rule out for themselves.
+        """
+
+        return self.with_product_counts().filter(products_count__gt=0)
 
 
 class DocumentType(MetaTagsMixin):
@@ -157,7 +166,7 @@ class Product(MetaTagsMixin):
     """
     One template on sale: a file plus everything the storefront shows about it.
 
-    Sold any number of times, so it carries no stock (ADR-0001). It cannot be deleted once bought -
+    Sold any number of times, so it carries no stock (docs/architecture.md). It cannot be deleted once bought -
     `OrderItem.product` is PROTECT, and taking it off the shelf is `is_active=False`.
 
     :param name: Product name (translated).
@@ -195,7 +204,11 @@ class Product(MetaTagsMixin):
     class Meta:
         verbose_name = _("Product")
         verbose_name_plural = _("Products")
-        ordering = ["-year", "name"]
+        # Newest first, undated last, and `pk` to break the remaining ties. Postgres sorts NULLs
+        # first under DESC, so a product with no year used to head the catalog; and year+name is
+        # not a total order, so two rows sharing both could swap between two pages of the same
+        # listing - a card shown twice and another one never.
+        ordering = [F("year").desc(nulls_last=True), "name", "pk"]
         indexes = [
             models.Index(fields=["is_active", "country", "document_type"]),
             models.Index(fields=["year"]),

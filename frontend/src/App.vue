@@ -1,5 +1,5 @@
 <script setup>
-import {computed, ref} from 'vue';
+import {computed, ref, watch} from 'vue';
 import {useRoute} from 'vue-router';
 import LangSwitch from '@/components/storefront/LangSwitch.vue';
 import CartButton from '@/components/storefront/CartButton.vue';
@@ -28,6 +28,11 @@ function closeMenu() {
     menuOpen.value = false;
     document.body.classList.remove('lock');
 }
+
+// Every link in the menu closes it by hand, but the back button is a navigation nobody clicked:
+// it would leave `lock` on <body> with the menu gone, and the page unscrollable with no way to
+// undo it. Watching the route covers both, and closing an already-closed menu costs nothing.
+watch(() => route.fullPath, closeMenu);
 
 const {scrolled, hidden} = useHeaderScroll(() => menuOpen.value);
 </script>

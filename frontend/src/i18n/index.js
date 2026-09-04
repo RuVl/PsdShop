@@ -23,7 +23,7 @@ export async function setupI18n(options = {}) {
 
 export async function setI18nLanguage(language) {
     if (!loadedLanguages.has(language))
-        await loadLocaleMessages(language, i18n);
+        await loadLocaleMessages(language);
 
     i18n.global.locale.value = language;
     document.querySelector('html').setAttribute('lang', language);

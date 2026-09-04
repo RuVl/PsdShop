@@ -46,7 +46,7 @@ class DocumentTypeListView(ListAPIView):
     serializer_class = DocumentTypeSerializer
 
     def get_queryset(self):
-        return DocumentType.objects.with_product_counts().filter(products_count__gt=0)
+        return DocumentType.objects.non_empty()
 
 
 class ProductListView(ListAPIView):

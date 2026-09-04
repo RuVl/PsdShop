@@ -27,7 +27,10 @@ from sales.models import Order, OrderItem, PaymentCallbackLog, Transaction
 
 # How long an order may take to pay before the invoice it was sent to is dead and the customer
 # has to start over. Taken from the model, not written out again, so the two cannot drift apart.
-INVOICE_WINDOW = Order.INVOICE_FROM_UPDATED
+# `time_to_pay` measures from `created_at`, so this is the from-creation leg of `Order.is_expired`,
+# not the from-updated one - the shorter constant would call the last ten minutes of a live invoice
+# late.
+INVOICE_WINDOW = Order.INVOICE_FROM_CREATED
 
 # The invoices somebody paid. `mismatch` is Plisio's word for a sum that did not match the invoice;
 # we hand the files over for it and stamp paid_at, so its revenue is in `gross` - and its
@@ -395,11 +398,7 @@ def download_rate(period: Period) -> dict:
     order is paid, so "delivered" and "paid" are the same instant now that nothing is reserved.
     """
 
-    delivered = OrderItem.objects.filter(
-        order__paid_at__gte=period.start,
-        order__paid_at__lt=period.end,
-    )
-    stats = delivered.aggregate(
+    stats = sold_items(period).aggregate(
         total=Count("pk"),
         taken=Count("pk", filter=Q(download_count__gt=0)),
         downloads=Coalesce(Sum("download_count"), 0),

@@ -35,7 +35,7 @@ class CustomerQuerySet(models.QuerySet):
         return self.filter(Exists(self._paid_orders()))
 
     def leads(self):
-        """Checkouts that never got paid. Kept as funnel data - see ADR-0005."""
+        """Checkouts that never got paid. Kept as funnel data - see docs/architecture.md."""
         return self.filter(~Exists(self._paid_orders()))
 
     def subscribed_buyers(self):
@@ -47,8 +47,8 @@ class Customer(models.Model):
     Somebody who reached the checkout, identified by email.
 
     Replaces the bare `Order.user_email` string, so purchases, access and mailing preferences
-    have one owner (ADR-0002). The row is written at checkout, before the payment, so a customer
-    without a paid order is a lead and not a buyer - see the admin filter and ADR-0005.
+    have one owner (docs/architecture.md). The row is written at checkout, before the payment, so a customer
+    without a paid order is a lead and not a buyer - see the admin filter and docs/architecture.md.
 
     :param email: Customer's email, the natural key.
     :param access_token: Opens the purchases page with every paid order of this customer.
@@ -65,7 +65,7 @@ class Customer(models.Model):
     access_token_expires_at = models.DateTimeField(null=True, blank=True)
 
     # Stored rather than read off the request: the delivery e-mail is sent from the Plisio
-    # webhook, where the customer's browser is nowhere in sight (ADR-0004).
+    # webhook, where the customer's browser is nowhere in sight (docs/architecture.md).
     language = models.CharField(max_length=5, choices=settings.LANGUAGES, default=settings.LANGUAGE_CODE)
 
     is_subscribed = models.BooleanField(default=True)
@@ -106,19 +106,25 @@ class Customer(models.Model):
     def is_access_token_valid(self) -> bool:
         return self.access_token_expires_at is not None and timezone.now() <= self.access_token_expires_at
 
-    def get_purchases_url(self, request: HttpRequest | None) -> str:
+    def get_purchases_path(self) -> str:
         """
-        Absolute link to the purchases page - the single link the delivery e-mail carries.
+        The purchases page, relative.
 
         The route is served by Django (the SPA shell) under `i18n_patterns`, so the language is a
         path prefix and has to be the customer's own: the mail is sent from the Plisio webhook,
-        where the only browser involved belongs to Plisio (ADR-0004).
+        where the only browser involved belongs to Plisio (docs/architecture.md).
+
+        Split out from `get_purchases_url` so the admin can render a link with no request at hand -
+        stashing one on the ModelAdmin is the bug `sales.admin.DownloadColumnsMixin` documents.
         """
 
         with translation.override(self.language):
-            path = reverse("storefront:purchases-token", kwargs={"token": self.access_token})
+            return reverse("storefront:purchases-token", kwargs={"token": self.access_token})
 
-        return absolute_url(path, request)
+    def get_purchases_url(self, request: HttpRequest | None) -> str:
+        """Absolute link to the purchases page - the single link the delivery e-mail carries."""
+
+        return absolute_url(self.get_purchases_path(), request)
 
     def set_language(self, language: str | None):
         """Remember the site language the customer is using, so the next e-mail speaks it."""
