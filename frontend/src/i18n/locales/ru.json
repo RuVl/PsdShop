@@ -99,7 +99,9 @@
     },
     "filter": {
       "all_categories": "Все категории",
+      "collapse": "Свернуть",
       "reset": "Сбросить фильтр",
+      "show_all": "Показать все ({count})",
       "title": "Фильтр по товарам"
     },
     "footer": {

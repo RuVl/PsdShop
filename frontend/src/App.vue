@@ -16,6 +16,7 @@ contentStore.load();
 
 const lang = computed(() => route.params.lang || 'en');
 const home = computed(() => ({name: 'home', params: {lang: lang.value}}));
+const purchases = computed(() => ({name: 'purchases', params: {lang: lang.value}}));
 
 const menuOpen = ref(false);
 
@@ -52,6 +53,11 @@ const {scrolled, hidden} = useHeaderScroll(() => menuOpen.value);
             <li v-for="navPage in contentStore.pages" :key="navPage.slug" class="menu__item white link-primary"
                 @click="closeMenu">
               <router-link :to="{name: 'page', params: {lang, pageSlug: navPage.slug}}">{{ navPage.title }}</router-link>
+            </li>
+            <!-- The purchases page is reachable from the e-mail link alone otherwise: a customer
+                 who lost it had no way in from the site at all. -->
+            <li class="menu__item white link-primary" @click="closeMenu">
+              <router-link :to="purchases">{{ $t('routes.my_purchases') }}</router-link>
             </li>
           </ul>
           <LangSwitch/>
@@ -93,6 +99,9 @@ const {scrolled, hidden} = useHeaderScroll(() => menuOpen.value);
               </li>
               <li v-for="navPage in contentStore.pages" :key="navPage.slug" class="footer__item text black link-primary">
                 <router-link :to="{name: 'page', params: {lang, pageSlug: navPage.slug}}">{{ navPage.title }}</router-link>
+              </li>
+              <li class="footer__item text black link-primary">
+                <router-link :to="purchases">{{ $t('routes.my_purchases') }}</router-link>
               </li>
             </ul>
           </div>

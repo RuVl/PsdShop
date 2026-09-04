@@ -99,7 +99,9 @@
     },
     "filter": {
       "all_categories": "All categories",
+      "collapse": "Collapse",
       "reset": "Reset the filter",
+      "show_all": "Show all ({count})",
       "title": "Filter products"
     },
     "footer": {
