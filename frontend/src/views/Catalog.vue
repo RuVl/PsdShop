@@ -6,6 +6,7 @@ import Pagination from '@/components/storefront/Pagination.vue';
 import ProductCard from '@/components/storefront/ProductCard.vue';
 import CheckoutModal from '@/components/storefront/CheckoutModal.vue';
 import Banner from '@/components/storefront/Banner.vue';
+import DocumentTypeFilter from '@/components/storefront/DocumentTypeFilter.vue';
 import IconCross from '@/components/icons/IconCross.vue';
 import IconSearch from '@/components/icons/IconSearch.vue';
 import {fetchProducts} from '@/api/catalog.js';
@@ -242,28 +243,7 @@ function onSearchIcon() {
                 </router-link>
               </div>
 
-              <div class="filter-products">
-                <div class="text-small black">{{ $t('storefront.filter.title') }}</div>
-                <div class="filter-products-content">
-                  <div class="filter-products-right">
-                    <p v-if="catalogStore.failed" class="text-small black">
-                      {{ $t('storefront.sidebar.failed') }}
-                    </p>
-                    <div class="filter-products-card-list">
-                      <router-link class="filter-products-card-list-item filter-products-btn"
-                                   :class="{current: typeSlug === 'all'}" :to="catalogTarget(countrySlug, 'all')">
-                        {{ $t('storefront.filter.all_categories') }}
-                      </router-link>
-                      <router-link v-for="dtype in catalogStore.documentTypes" :key="dtype.slug"
-                                   class="filter-products-card-list-item filter-products-btn"
-                                   :class="{current: dtype.slug === typeSlug}"
-                                   :to="catalogTarget(countrySlug, dtype.slug)">
-                        {{ dtype.name }}
-                      </router-link>
-                    </div>
-                  </div>
-                </div>
-              </div>
+              <DocumentTypeFilter :country-slug="countrySlug" :type-slug="typeSlug"/>
 
               <p v-if="state === 'loading'" class="text black">{{ $t('products.loading') }}</p>
               <p v-else-if="state === 'failed'" class="text black">{{ $t('products.error') }}</p>
@@ -364,12 +344,5 @@ function onSearchIcon() {
 
 .products__reset:hover {
   color: var(--primary);
-}
-
-/* The design marked the active filter through `input:checked + span`; these are router-links, so
-   the state has to be painted on the class the router does not give either. */
-.filter-products-btn.current {
-  color: var(--primary);
-  font-weight: var(--bold);
 }
 </style>

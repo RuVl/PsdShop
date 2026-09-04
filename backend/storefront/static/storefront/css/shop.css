@@ -382,3 +382,72 @@
         transition: none;
     }
 }
+
+
+/* The document-type facet.
+
+   style.css draws it as a row of 12px text links that wraps (`.filter-products-card-list`), which
+   goes ragged and right-aligned the moment the shop has more than a handful of types. This is the
+   replacement; it sits here rather than in a scoped block because the bot page
+   (storefront/catalog.html) draws the same chips. */
+
+.type-chip {
+    flex: none;
+    display: inline-flex;
+    align-items: center;
+    height: 32px;
+    padding: 0 14px;
+    font-size: 13px;
+    line-height: 1;
+    font-weight: var(--regular);
+    white-space: nowrap;
+    color: rgba(0, 0, 0, .6);
+    background: var(--white);
+    border: 1px solid rgba(63, 47, 241, .2);
+    border-radius: 50px;
+    transition: color .3s, background .3s, border-color .3s;
+}
+
+.type-chip:hover {
+    color: var(--primary);
+    border-color: var(--primary);
+}
+
+.type-chip.current {
+    color: var(--white);
+    background: var(--primary);
+    border-color: var(--primary);
+}
+
+/* The chips wrap into a block instead of a single ragged line. The SPA clamps that block to two
+   rows and offers a button for the rest (components/storefront/DocumentTypeFilter.vue); the bot
+   page renders the same grid with every chip in it. */
+.type-filter {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 10px;
+    margin-top: 15px;
+}
+
+.type-filter__grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    width: 100%;
+}
+
+/* Two rows of chips: 32px each plus the 8px between them. Clamping in the layout rather than by
+   counting items keeps it honest when a long type name takes a whole row on a narrow screen. */
+.type-filter__grid.is-collapsed {
+    max-height: 72px;
+    overflow: hidden;
+}
+
+/* A narrow screen puts one chip on a row, so two rows are two types and the button carries the
+   whole list. Three rows there, still short of pushing the grid off the screen. */
+@media (max-width: 700px) {
+    .type-filter__grid.is-collapsed {
+        max-height: 112px;
+    }
+}

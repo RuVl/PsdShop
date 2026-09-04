@@ -225,3 +225,34 @@ not what protects the header.
 **Cost.** The default is only as good as `DEFAULT_FROM_EMAIL`: left at the `.env.dist` placeholder
 it stamps `example.com`, which is worse than a hostname. Check the header itself after any change
 to the sender address - Gmail, "Show original", the `Message-ID` line.
+
+## 2026-09-04 - the type filter wrapped into a ragged block, and the purchases page had no entrance
+
+Two small things the storefront had been living with, closed together.
+
+**The document-type facet.** `style.css` draws it as a row of 12px text links, right-aligned and
+wrapping (`.filter-products-card-list`, `justify-content: flex-end`). With the three types the seed
+builds it looks like the mockup; with fourteen it becomes three ragged right-aligned rows that push
+the grid down and shift on every language switch, because the Russian names are longer.
+
+Four replacements were built and shown side by side on real data - a horizontally scrolling chip
+row, the wrapping grid clamped to two rows, a `<select>`, and a vertical list in the left sidebar
+next to the countries. The grid won: nothing moves, everything is one click away, and the whole
+list stays in the DOM for the crawler. It is `.type-filter__grid` in `shop.css` (both presentations
+link it) plus `components/storefront/DocumentTypeFilter.vue`.
+
+The clamp is a `max-height` on the box, and whether the button appears at all is **measured**
+(`scrollHeight - clientHeight`), not counted: a long type name takes a whole row of its own at
+320px, so "more than N chips" answers a different question than "is there a third row". The bot
+page renders the same chips uncollapsed - it has no script to press the button with, and every
+link has to be on the page anyway.
+
+**The purchases page.** `/<lang>/purchases/` - the form that re-sends the delivery link - existed,
+was routed in both presentations and was reachable from nothing: only the e-mail linked it, which
+is exactly the thing a customer who needs that page has lost. It is now a menu entry in the header
+and a line in the footer, in `App.vue` and in `storefront/base.html` both.
+
+**Cost.** The chips are the second place after the sidebar where `.current` is painted by us rather
+than by the design; a class rename in `shop.css` silently takes the selected state with it. And the
+"Show all (N)" button is SPA-only by design - if the clamp ever moves to the bot page, it has to
+move as a CSS-only disclosure, not as a button that does nothing.

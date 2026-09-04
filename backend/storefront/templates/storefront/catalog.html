@@ -77,20 +77,23 @@
 
                         <div class="filter-products">
                             <div class="text-small black">{% translate "Filter products" %}</div>
-                            <div class="filter-products-content">
-                                <div class="filter-products-right">
-                                    <div class="filter-products-card-list">
-                                        {% comment %}
-                                            A facet link keeps `?q=` and drops `page` - the rule
-                                            catalogTarget() follows in views/Catalog.vue.
-                                        {% endcomment %}
-                                        <a class="filter-products-card-list-item filter-products-btn {% if not selected_type %}current{% endif %}"
-                                           href="{% url 'storefront:catalog' country=country_slug doctype='all' %}{% if query %}?q={{ query|urlencode }}{% endif %}">{% translate "All categories" %}</a>
-                                        {% for dtype in document_types %}
-                                        <a class="filter-products-card-list-item filter-products-btn {% if dtype == selected_type %}current{% endif %}"
-                                           href="{% url 'storefront:catalog' country=country_slug doctype=dtype.slug %}{% if query %}?q={{ query|urlencode }}{% endif %}">{{ dtype.name }}</a>
-                                        {% endfor %}
-                                    </div>
+                            {% comment %}
+                                The chips of components/storefront/DocumentTypeFilter.vue, with
+                                every one of them on the page: the SPA clamps the block to two rows
+                                and expands it on a button, which a bot has no script to press.
+                                Same links, same addresses, same order.
+
+                                A facet link keeps `?q=` and drops `page` - the rule
+                                catalogTarget() follows in views/Catalog.vue.
+                            {% endcomment %}
+                            <div class="type-filter">
+                                <div class="type-filter__grid">
+                                    <a class="type-chip {% if not selected_type %}current{% endif %}"
+                                       href="{% url 'storefront:catalog' country=country_slug doctype='all' %}{% if query %}?q={{ query|urlencode }}{% endif %}">{% translate "All categories" %}</a>
+                                    {% for dtype in document_types %}
+                                    <a class="type-chip {% if dtype == selected_type %}current{% endif %}"
+                                       href="{% url 'storefront:catalog' country=country_slug doctype=dtype.slug %}{% if query %}?q={{ query|urlencode }}{% endif %}">{{ dtype.name }}</a>
+                                    {% endfor %}
                                 </div>
                             </div>
                         </div>

@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: verdoc-backend\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-09-03 15:50+0000\n"
+"POT-Creation-Date: 2026-09-03 21:29+0000\n"
 "PO-Revision-Date: 2026-08-06 15:49+0000\n"
 "Last-Translator: \n"
 "Language-Team: \n"
@@ -38,47 +38,47 @@ msgstr ""
 msgid "Countries"
 msgstr ""
 
-#: catalog/models.py:109
+#: catalog/models.py:118
 msgid "Document type"
 msgstr ""
 
-#: catalog/models.py:110
+#: catalog/models.py:119
 msgid "Document types"
 msgstr ""
 
-#: catalog/models.py:196
+#: catalog/models.py:205
 msgid "Product"
 msgstr ""
 
-#: catalog/models.py:197
+#: catalog/models.py:206
 msgid "Products"
 msgstr ""
 
-#: catalog/models.py:262
+#: catalog/models.py:275
 msgid "Product image"
 msgstr ""
 
-#: catalog/models.py:263
+#: catalog/models.py:276
 msgid "Product images"
 msgstr ""
 
-#: content/models.py:33
+#: content/models.py:51
 msgid "Page"
 msgstr ""
 
-#: content/models.py:34
+#: content/models.py:52
 msgid "Pages"
 msgstr ""
 
-#: content/models.py:77
+#: content/models.py:95
 msgid "Slide"
 msgstr ""
 
-#: content/models.py:78
+#: content/models.py:96
 msgid "Slides"
 msgstr ""
 
-#: content/models.py:105 content/models.py:106 content/models.py:109
+#: content/models.py:123 content/models.py:124 content/models.py:127
 msgid "Site settings"
 msgstr ""
 
@@ -138,27 +138,27 @@ msgstr ""
 msgid "Orders"
 msgstr ""
 
-#: sales/models.py:228
+#: sales/models.py:231
 msgid "Order item"
 msgstr ""
 
-#: sales/models.py:229
+#: sales/models.py:232
 msgid "Order items"
 msgstr ""
 
-#: sales/models.py:341
+#: sales/models.py:344
 msgid "Transaction"
 msgstr ""
 
-#: sales/models.py:342
+#: sales/models.py:345
 msgid "Transactions"
 msgstr ""
 
-#: sales/models.py:368
+#: sales/models.py:371
 msgid "Payment callback"
 msgstr ""
 
-#: sales/models.py:369
+#: sales/models.py:372
 msgid "Payment callbacks"
 msgstr ""
 
@@ -199,34 +199,39 @@ msgstr ""
 msgid "Price"
 msgstr "Цена"
 
-#: storefront/templates/storefront/_sidebar.html:3
+#: storefront/templates/storefront/_sidebar.html:10
 msgid "Store categories"
 msgstr "Категории магазина"
 
-#: storefront/templates/storefront/_sidebar.html:9
+#: storefront/templates/storefront/_sidebar.html:16
 msgid "Popular"
 msgstr "Популярные"
 
-#: storefront/templates/storefront/_sidebar.html:25
-#: storefront/templates/storefront/catalog.html:90
+#: storefront/templates/storefront/_sidebar.html:32
+#: storefront/templates/storefront/catalog.html:94
 msgid "All categories"
 msgstr "Все категории"
 
-#: storefront/templates/storefront/_sidebar.html:29
+#: storefront/templates/storefront/_sidebar.html:36
 msgid "All countries"
 msgstr "Все страны"
 
 #: storefront/templates/storefront/base.html:21
-#: storefront/templates/storefront/base.html:61
+#: storefront/templates/storefront/base.html:64
 #: storefront/templates/storefront/product.html:12
 msgid "Home"
 msgstr "Главная"
 
-#: storefront/templates/storefront/base.html:58
+#: storefront/templates/storefront/base.html:27
+#: storefront/templates/storefront/base.html:68
+msgid "My purchases"
+msgstr "Мои покупки"
+
+#: storefront/templates/storefront/base.html:61
 msgid "Links"
 msgstr "Ссылки"
 
-#: storefront/templates/storefront/base.html:70
+#: storefront/templates/storefront/base.html:74
 msgid "Contact support"
 msgstr "Написать в поддержку"
 
@@ -252,22 +257,23 @@ msgid "Search by name"
 msgstr "Поиск по названию"
 
 #: storefront/templates/storefront/catalog.html:80
+#: storefront/templates/storefront/catalog.html:92
 msgid "Filter products"
 msgstr "Фильтр по товарам"
 
-#: storefront/templates/storefront/catalog.html:104
+#: storefront/templates/storefront/catalog.html:107
 msgid "Nothing found for this selection."
 msgstr "По этому запросу ничего не найдено."
 
-#: storefront/templates/storefront/catalog.html:115
+#: storefront/templates/storefront/catalog.html:118
 msgid "Catalog pages"
 msgstr "Страницы каталога"
 
-#: storefront/templates/storefront/catalog.html:126
+#: storefront/templates/storefront/catalog.html:129
 msgid "Previous page"
 msgstr "Предыдущая страница"
 
-#: storefront/templates/storefront/catalog.html:142
+#: storefront/templates/storefront/catalog.html:145
 msgid "Next page"
 msgstr "Следующая страница"
 
