@@ -451,3 +451,18 @@
         max-height: 112px;
     }
 }
+
+/* The card preview - the goods are A4 portrait scans and the mockup's 69.234% landscape box cropped
+   the top and the bottom off every one of them. The box takes the paper's own ratio instead, and
+   `contain` keeps a preview that is not A4 (an old landscape upload, a spread) whole rather than
+   cropped. The letterbox is white because that is what a sheet of paper is; the card's own
+   `--secondary` would read as a frame around the picture. */
+.product-item-image {
+    padding: 0;
+    aspect-ratio: 210 / 297;
+    background: var(--white);
+}
+
+.product-item-image img {
+    object-fit: contain;
+}
