@@ -466,3 +466,9 @@
 .product-item-image img {
     object-fit: contain;
 }
+
+/* description is a plain admin textarea, not the rich-text .idesc markup style.css was built for -
+   preserve the author's line breaks without turning the field into HTML. */
+.idesc p {
+    white-space: pre-line;
+}
