@@ -11,6 +11,12 @@ import vue from '@vitejs/plugin-vue'
 
 const OUT_DIR = '../backend/storefront/static/storefront/spa'
 const SHELL_TEMPLATE = '../backend/storefront/templates/storefront/shell.html'
+const CSS_DIR = '../backend/storefront/static/storefront/css'
+// Raw source for both - style.css is the designer's file (CLAUDE.md: kept a copy of the mockup),
+// shop.css is ours. Neither is imported from SPA source, so they need their own rollup input to
+// get minified; the fixed output name below is what lets them stay at their existing /static/...
+// URL (base.html, shell.html and this file's own <link> tags never change).
+const RAW_CSS = {style: 'style.css', shop: 'shop.css'}
 
 const djangoShell = () => ({
     name: 'django-shell',
@@ -27,6 +33,15 @@ const djangoShell = () => ({
         if (existsSync(built)) {
             mkdirSync(fileURLToPath(new URL('.', new URL(SHELL_TEMPLATE, import.meta.url))), {recursive: true})
             renameSync(built, shell)
+        }
+
+        const cssDir = fileURLToPath(new URL(CSS_DIR, import.meta.url))
+        mkdirSync(cssDir, {recursive: true})
+        for (const name of Object.values(RAW_CSS)) {
+            const minified = fileURLToPath(new URL(`${OUT_DIR}/raw-css/${name}`, import.meta.url))
+            if (existsSync(minified)) {
+                renameSync(minified, fileURLToPath(new URL(`${CSS_DIR}/${name}`, import.meta.url)))
+            }
         }
     },
 })
@@ -58,6 +73,22 @@ export default defineConfig(({mode}) => {
         build: {
             outDir: OUT_DIR,
             emptyOutDir: true,
+            rollupOptions: {
+                input: {
+                    main: fileURLToPath(new URL('./index.html', import.meta.url)),
+                    ...Object.fromEntries(
+                        Object.entries(RAW_CSS).map(([key, name]) => [key, fileURLToPath(new URL(`${CSS_DIR}/${name}`, import.meta.url))]),
+                    ),
+                },
+                output: {
+                    // Keep the SPA's own chunks/assets on the normal hashed pattern; only the two
+                    // raw CSS entries get a fixed name, picked up by name (see RAW_CSS above).
+                    assetFileNames: (assetInfo) => {
+                        const rawName = Object.values(RAW_CSS).find((name) => assetInfo.names?.includes(name))
+                        return rawName ? `raw-css/${rawName}` : 'assets/[name]-[hash][extname]'
+                    },
+                },
+            },
         },
         server: {
             // The SPA references the same /static and /media the backend serves (design CSS,
