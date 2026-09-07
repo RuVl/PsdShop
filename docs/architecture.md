@@ -67,9 +67,11 @@ templates: one msgid holds both versions and a third language does not fork the 
 **Checkout is rate limited at the edge.** It no longer blocks the catalog, but it still costs us:
 `POST /api/order/` calls Plisio (30s timeout, account limits), `POST /api/send-links/` mails any
 address typed into it (sender reputation), and both write rows. `limit_req` in nginx on
-`/api/order/` (10 r/m), `/api/send-links/` (5 r/m) and `/admin/login/`; `MAX_ORDER_ITEMS`; an MX
-check on the mail domain (`customer/validators.py`, **fails open** - losing a sale to our own DNS is
-worse than writing to a dead domain, switch with `VALIDATE_EMAIL_MX`); and
+`/api/order/` (10 r/m), `/api/send-links/` (5 r/m), `/admin/login/` and - only to keep a token scan
+out of the log and the database, never as the thing that protects a uuid4 - `/api/purchases/` and
+`/api/files/` (120 r/m, burst 40); `MAX_ORDER_ITEMS`; an MX check on the mail domain
+(`customer/validators.py`, **fails open** - losing a sale to our own DNS is worse than writing to a
+dead domain, switch with `VALIDATE_EMAIL_MX`); and
 `Order.objects.reusable()` returns the live invoice on a double click (narrow conditions: `PENDING`,
 not expired, same products, catalog price unchanged - which is why `Order.invoice_url` exists). The
 limits are in nginx, not DRF: the zone at the edge is shared by every gunicorn worker and sees the

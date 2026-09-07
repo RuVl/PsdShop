@@ -17,6 +17,11 @@ COPY frontend/ ./
 # vite writes to ../backend/storefront/... relative to /frontend (OUT_DIR in vite.config.js).
 RUN npm run build
 
+# shop.css/style.css are hand-authored and linked directly (not bundled by vite) - minified here,
+# into the image alone, so the git-tracked source stays readable (frontend/scripts/minify-css.mjs).
+COPY backend/storefront/static/storefront/css/style.css backend/storefront/static/storefront/css/shop.css /tmp/raw-css/
+RUN node scripts/minify-css.mjs
+
 
 FROM docker.io/library/python:3.13-slim
 LABEL authors="RuVl_13"
@@ -51,6 +56,10 @@ COPY backend/ .
 # the storefront views render for people.
 COPY --from=spa-build /backend/storefront/static/storefront/spa ./storefront/static/storefront/spa
 COPY --from=spa-build /backend/storefront/templates/storefront/shell.html ./storefront/templates/storefront/shell.html
+
+# Overwrites the plain-text style.css/shop.css that `COPY backend/ .` above just brought in, with
+# the minified versions built above - image only, the git-tracked source is untouched.
+COPY --from=spa-build /backend/storefront/static/storefront/css ./storefront/static/storefront/css
 
 # Copy the cronjob, apply it (broadcasts every 15 min, callback log pruning weekly)
 COPY backend/cronjob /etc/cron.d/psdshop-cron

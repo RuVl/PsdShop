@@ -114,7 +114,13 @@ VALIDATE_EMAIL_MX = env.bool("VALIDATE_EMAIL_MX", default=True)
 
 # The API answers a storefront, not a person: JSON only. DRF's browsable renderer is a writable
 # HTML form on every endpoint, so it stays a development convenience.
+# The authentication list is spelled out because DRF's default adds BasicAuthentication, which
+# turns every public endpoint into a place to try Django passwords against. Nothing here
+# authenticates over Basic - the admin uses a session - so the session is all that is left.
 REST_FRAMEWORK = {
+    "DEFAULT_AUTHENTICATION_CLASSES": [
+        "rest_framework.authentication.SessionAuthentication",
+    ],
     "DEFAULT_RENDERER_CLASSES": ["rest_framework.renderers.JSONRenderer"],
 }
 
