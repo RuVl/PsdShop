@@ -21,15 +21,12 @@ from backend.sites import absolute_url
 
 
 def site_name() -> str:
-    return _("PDF document store")
+    return _("Photoshop Templates")
 
 
 def default_description() -> str:
     # The hero copy doubles as the fallback description, so the snippet matches the page.
-    return _(
-        "Editable proof-of-address documents, utility bills and bank statements in PDF. "
-        "Delivered by a download link right after payment."
-    )
+    return _("Layered PSD document templates with fonts included. Download link sent right after payment.")
 
 
 def build_meta(

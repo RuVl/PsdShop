@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: verdoc-backend\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-09-03 21:29+0000\n"
+"POT-Creation-Date: 2026-09-08 10:13+0000\n"
 "PO-Revision-Date: 2026-08-06 15:49+0000\n"
 "Last-Translator: \n"
 "Language-Team: \n"
@@ -182,17 +182,17 @@ msgid "Your order is complete"
 msgstr "Ваш заказ выполнен"
 
 #: storefront/seo.py:24 storefront/templates/storefront/base.html:6
-msgid "PDF document store"
-msgstr "Магазин PDF-документов"
+#: storefront/templates/storefront/catalog.html:10
+msgid "Photoshop Templates"
+msgstr "Шаблоны для Photoshop"
 
-#: storefront/seo.py:30 storefront/templates/storefront/catalog.html:11
+#: storefront/seo.py:29 storefront/templates/storefront/catalog.html:11
 msgid ""
-"Editable proof-of-address documents, utility bills and bank statements in "
-"PDF. Delivered by a download link right after payment."
+"Layered PSD document templates with fonts included. Download link sent right "
+"after payment."
 msgstr ""
-"Редактируемые документы для подтверждения адреса, счета за коммунальные "
-"услуги и банковские выписки в PDF. Ссылка на скачивание приходит сразу после "
-"оплаты."
+"Многослойные psd шаблоны документов. Шрифты идут в комплекте. Ссылка на "
+"скачивание приходит сразу после оплаты."
 
 #: storefront/templates/storefront/_product_card.html:20
 #: storefront/templates/storefront/product.html:71
@@ -235,10 +235,6 @@ msgstr "Ссылки"
 msgid "Contact support"
 msgstr "Написать в поддержку"
 
-#: storefront/templates/storefront/catalog.html:10
-msgid "Online store of PDF files"
-msgstr "Онлайн-магазин PDF-файлов"
-
 #: storefront/templates/storefront/catalog.html:59
 msgid "Product list"
 msgstr "Список товаров"
@@ -257,7 +253,6 @@ msgid "Search by name"
 msgstr "Поиск по названию"
 
 #: storefront/templates/storefront/catalog.html:80
-#: storefront/templates/storefront/catalog.html:92
 msgid "Filter products"
 msgstr "Фильтр по товарам"
 
@@ -280,6 +275,9 @@ msgstr "Следующая страница"
 #: storefront/templates/storefront/product.html:32
 msgid "Product card"
 msgstr "Карточка товара"
+
+#~ msgid "PDF document store"
+#~ msgstr "Магазин PDF-документов"
 
 #~ msgid "Rules"
 #~ msgstr "Правила"
