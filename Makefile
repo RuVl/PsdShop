@@ -18,6 +18,16 @@
 # Оба сценария используют один и тот же volume psdshop_postgres (общие данные,
 # осознанно), но это РАЗНЫЕ контейнеры postgres — не поднимайте оба одновременно.
 #
+# Защита окружений (scripts/make_guard.py, зовётся из целей-стражей guard-dev/guard-prod):
+#   * dev-цели ОТКАЗЫВАЮТСЯ работать там, где похоже на прод: есть маркер .production
+#     (`make mark-prod`), выставлен PSDSHOP_ENV=prod или запущены контейнеры прод-стека.
+#     Осознанный обход: ALLOW_DEV=1 make <цель>.
+#   * цели прод-стека ОТКАЗЫВАЮТСЯ стартовать, пока поднят dev-postgres (общий volume).
+#   * оба стража проверяют наличие нужных .env — вместо невнятной ошибки uv/compose.
+#
+# Любую цель можно звать в любой момент: цели прод-стека сами поднимают backend/postgres
+# (`stack`/`stack-db`, nginx не трогают), dev-цели — dev-postgres, фронтовые — npm install.
+#
 # Кроссплатформенно (Linux / Windows): рецепты — это только `cd` + вызов бинарника
 # (uv / uvx / docker compose / npm). Файловые операции делает Python через
 # `uv run --no-project`, поэтому grep/sed/find не нужны.
@@ -37,6 +47,11 @@ COMPOSE_DEV ?= docker compose -f docker-compose.dev.yaml
 UV          ?= uv
 RUFF        ?= uvx ruff@0.15.12
 PRECOMMIT   ?= uvx pre-commit
+
+# Страж окружений + наборы .env, без которых рецепты падают невнятно.
+GUARD          ?= $(UV) run --no-project python scripts/make_guard.py
+PROD_ENV_FILES ?= backend/.env frontend/.env postgres/.env
+DEV_ENV_FILES  ?= backend/.env backend/dev.env postgres/.env
 
 # Пути для ruff (со своим [tool.ruff] в backend/pyproject.toml).
 RUFF_PATHS ?= backend
@@ -68,6 +83,25 @@ DEV_PORT ?= 8000
 .PHONY: help
 help: ## Показать список целей
 	@$(UV) run --no-project python -c "import re; [print(f'  {x[1]:<20} {x[2]}') for l in open('Makefile', encoding='utf-8') for x in [re.match(r'^([A-Za-z_-]+):.*?## (.*)', l)] if x]"
+
+# --- Защита окружений -------------------------------------------------------
+# Служебные цели (без ## — в help не показываются), их ставят в зависимости остальным.
+
+.PHONY: guard-prod
+guard-prod:
+	@$(GUARD) prod --docker $(DOCKER) --files $(PROD_ENV_FILES)
+
+.PHONY: guard-dev
+guard-dev:
+	@$(GUARD) dev --docker $(DOCKER) --files $(DEV_ENV_FILES)
+
+.PHONY: mark-prod
+mark-prod: ## Пометить машину как прод (файл .production): dev-цели тут будут отказывать
+	@$(UV) run --no-project python -c "import pathlib; pathlib.Path('.production').write_text('production host: dev-* make targets refuse to run here\n', encoding='utf-8'); print('OK: маркер .production создан, dev-цели заблокированы')"
+
+.PHONY: unmark-prod
+unmark-prod: ## Снять маркер .production
+	@$(UV) run --no-project python -c "import pathlib; pathlib.Path('.production').unlink(missing_ok=True); print('OK: маркер .production удалён')"
 
 # --- Подготовка окружения ---------------------------------------------------
 
@@ -117,15 +151,24 @@ install-frontend: ## Зависимости фронтенда (npm install)
 # --- Docker -----------------------------------------------------------------
 
 .PHONY: up
-up: ## Поднять весь стек (backend + postgres + frontend-nginx)
+up: guard-prod ## Поднять весь стек (backend + postgres + frontend-nginx)
 	$(COMPOSE) up -d --build
+
+.PHONY: stack
+# Backend (и postgres как его зависимость) для exec-целей: nginx и порты 80/443 не трогаем.
+stack: guard-prod
+	$(COMPOSE) exec backend true || $(COMPOSE) up -d --build --wait backend
+
+.PHONY: stack-db
+stack-db: guard-prod
+	$(COMPOSE) exec postgres pg_isready -U $(PG_USER) || $(COMPOSE) up -d --build --wait postgres
 
 .PHONY: down
 down: ## Остановить стек
 	$(COMPOSE) down
 
 .PHONY: build
-build: ## Пересобрать образы
+build: guard-prod ## Пересобрать образы
 	$(COMPOSE) build
 
 .PHONY: ps
@@ -152,7 +195,7 @@ logs-nginx: ## Логи frontend-nginx
 # Нужен ключ secrets/opendkim/<домен>.private и EMAIL_URL=smtp://mail:587
 
 .PHONY: mail-up
-mail-up: ## Поднять резервный mail-релей (профиль mail)
+mail-up: guard-prod ## Поднять резервный mail-релей (профиль mail)
 	$(COMPOSE) --profile mail up -d mail
 
 .PHONY: mail-down
@@ -166,7 +209,7 @@ logs-mail: ## Логи mail-релея
 # --- Локальная разработка (backend/frontend локально, postgres в docker) -----
 
 .PHONY: dev-infra
-dev-infra: ## Поднять dev-инфраструктуру, если ещё не поднята (ждёт healthy)
+dev-infra: guard-dev ## Поднять dev-инфраструктуру, если ещё не поднята (ждёт healthy)
 	$(COMPOSE_DEV) exec postgres pg_isready -U $(PG_USER) || $(COMPOSE_DEV) up -d --build --wait
 
 .PHONY: dev-infra-down
@@ -174,19 +217,25 @@ dev-infra-down: ## Остановить dev-инфраструктуру
 	$(COMPOSE_DEV) down
 
 .PHONY: dev-reset
-dev-reset: ## Пересоздать контейнер dev-postgres (сохраняет volume psdshop_postgres)
+dev-reset: guard-dev ## Пересоздать контейнер dev-postgres (сохраняет volume psdshop_postgres)
 	@echo "Пересоздаю контейнер dev-postgres (down + up). Данные в volume psdshop_postgres НЕ удаляются."
 	$(COMPOSE_DEV) down
 	$(COMPOSE_DEV) up -d --build --wait
 	@echo "OK: dev-postgres пересоздан."
 
 .PHONY: dev-nuke
-dev-nuke: ## УДАЛИТЬ dev-БД вместе с volume psdshop_postgres и поднять пустую
-	@echo "ВНИМАНИЕ: volume psdshop_postgres будет удалён вместе со всеми данными."
+dev-nuke: guard-dev ## УДАЛИТЬ dev-БД вместе с volume psdshop_postgres (требует FORCE=1)
+ifneq ($(FORCE),1)
+	@echo "ОПАСНО: volume psdshop_postgres будет удалён вместе со всеми данными,"
+	@echo "а это тот же volume, что использует прод-стек."
 	@echo "Нужно после перегенерации миграций: старая БД помнит удалённые файлы миграций."
+	@echo "Если уверены - повторите с FORCE=1: make dev-nuke FORCE=1"
+	@exit 1
+else
 	$(COMPOSE_DEV) down -v
 	$(COMPOSE_DEV) up -d --build --wait
 	@echo "OK: пустая dev-БД поднята. Дальше: make dev-migrate"
+endif
 
 .PHONY: dev-manage
 dev-manage: dev-infra ## Произвольная manage.py команда локально (dev-БД): make dev-manage c="seed_testdata --flush"
@@ -209,87 +258,99 @@ dev-test: dev-infra dev-compilemessages ## Тесты локальным backend
 	$(MANAGE_DEV) test $(if $(t),$(t),catalog content customer mailing sales storefront)
 
 .PHONY: dev-messages
-dev-messages: ## Пересобрать backend/locale/ru/.../django.po из исходников (нужен gettext)
+dev-messages: guard-dev ## Пересобрать backend/locale/ru/.../django.po из исходников (нужен gettext)
 	$(MANAGE_DEV) makemessages -l ru
 
 .PHONY: dev-compilemessages
-dev-compilemessages: ## Скомпилировать .po в .mo локально (в контейнере это делает startup.sh)
+dev-compilemessages: guard-dev ## Скомпилировать .po в .mo локально (в контейнере это делает startup.sh)
 	$(MANAGE_DEV) compilemessages --ignore=.venv
 
 # --- Django (внутри контейнера backend) -------------------------------------
 
 .PHONY: manage
-manage: ## Произвольная manage.py команда в контейнере: make manage c="showmigrations" / c="shell"
+manage: stack ## Произвольная manage.py команда в контейнере: make manage c="showmigrations" / c="shell"
 	$(MANAGE) $(c)
 
 .PHONY: migrate
-migrate: ## Применить миграции
+migrate: stack ## Применить миграции
 	$(MANAGE) migrate
 
 .PHONY: makemigrations
-makemigrations: ## Создать миграции: make makemigrations m="catalog content customer sales"
+makemigrations: stack ## Создать миграции: make makemigrations m="catalog content customer sales"
 	$(MANAGE) makemigrations $(m)
 
 .PHONY: test
-test: compilemessages ## Тесты в контейнере (t="sales" - только часть)
+test: stack compilemessages ## Тесты в контейнере (t="sales" - только часть)
 	$(MANAGE) test $(if $(t),$(t),catalog content customer mailing sales storefront)
 
 .PHONY: collectstatic
-collectstatic: ## Собрать статику
+collectstatic: stack ## Собрать статику
 	$(MANAGE) collectstatic --no-input
 
 .PHONY: messages
-messages: ## Пересобрать .po из исходников в контейнере
+messages: stack ## Пересобрать .po из исходников в контейнере
 	$(MANAGE) makemessages -l ru
 
 .PHONY: compilemessages
-compilemessages: ## Скомпилировать .po в .mo в контейнере (startup.sh делает это сам)
+compilemessages: stack ## Скомпилировать .po в .mo в контейнере (startup.sh делает это сам)
 	$(MANAGE) compilemessages --ignore=.venv
 
 .PHONY: superuser
-superuser: ## Создать суперпользователя
+superuser: stack ## Создать суперпользователя
 	$(MANAGE) createsuperuser
 
 # --- Доменные команды -------------------------------------------------------
 
 .PHONY: broadcast
-broadcast: ## Разослать письма из очереди (QUEUED); флаги: c="--id N --dry-run --test"
+broadcast: stack ## Разослать письма из очереди (QUEUED); флаги: c="--id N --dry-run --test"
 	$(MANAGE) broadcast $(c)
 
 .PHONY: prune-callbacks
-prune-callbacks: ## Удалить сырые колбэки Plisio старше срока хранения; флаги: c="--days 180 --dry-run"
+prune-callbacks: stack ## Удалить сырые колбэки Plisio старше срока хранения; флаги: c="--days 180 --dry-run"
 	$(MANAGE) prune_callback_logs $(c)
 
 # --- База данных: дамп / импорт ---------------------------------------------
 
 .PHONY: db-dump
-db-dump: ## Дамп БД в файл (DUMP=backups/dump.sql по умолчанию)
+db-dump: stack-db ## Дамп БД в файл (DUMP=backups/dump.sql по умолчанию)
+	@$(UV) run --no-project python -c "import pathlib, sys; pathlib.Path(sys.argv[1]).parent.mkdir(parents=True, exist_ok=True)" "$(DUMP)"
 	$(COMPOSE) exec -T postgres pg_dump -U $(PG_USER) -d $(PG_DB) > $(DUMP)
 	@echo "dumped -> $(DUMP)"
 
 .PHONY: db-restore
-db-restore: ## Восстановить БД из файла (требует FORCE=1): make db-restore DUMP=backups/x.sql FORCE=1
+db-restore: stack-db ## Восстановить БД из файла (требует FORCE=1): make db-restore DUMP=backups/x.sql FORCE=1
 ifneq ($(FORCE),1)
 	@echo "ОПАСНО: db-restore перезапишет данные в живой БД дампом $(DUMP)."
 	@echo "Если уверены - повторите с FORCE=1: make db-restore DUMP=$(DUMP) FORCE=1"
 	@exit 1
 else
+	@$(UV) run --no-project python -c "import pathlib, sys; sys.exit(0) if pathlib.Path(sys.argv[1]).is_file() else sys.exit(f'ОТКАЗ: нет файла дампа {sys.argv[1]}')" "$(DUMP)"
 	$(COMPOSE) exec -T postgres psql -U $(PG_USER) -d $(PG_DB) < $(DUMP)
 	@echo "restored <- $(DUMP)"
 endif
 
 .PHONY: psql
-psql: ## Интерактивный psql в контейнере
+psql: stack-db ## Интерактивный psql в контейнере
 	$(COMPOSE) exec postgres psql -U $(PG_USER) -d $(PG_DB)
 
 # --- Фронтенд ---------------------------------------------------------------
 
+.PHONY: frontend-deps
+# npm install только когда node_modules нет - иначе цель звалась бы впустую на каждый билд.
+frontend-deps:
+	@$(UV) run --no-project python -c "import pathlib, sys; sys.exit(0 if pathlib.Path('frontend/node_modules').is_dir() else 1)" || $(MAKE) install-frontend
+
+.PHONY: guard-dev-frontend
+# Свой набор .env: vite читает frontend/.env.development, backend/dev.env ему не нужен.
+guard-dev-frontend:
+	@$(GUARD) dev --docker $(DOCKER) --files frontend/.env.development
+
 .PHONY: dev-frontend
-dev-frontend: ## Vite dev-сервер (http://localhost:5173/; /static, /media и /api берёт с dev-backend)
+dev-frontend: guard-dev-frontend frontend-deps ## Vite dev-сервер (http://localhost:5173/; /static, /media и /api берёт с dev-backend)
 	cd frontend && npm run dev
 
 .PHONY: spa
-spa: ## Собрать SPA: ассеты в backend/.../static/storefront/spa, shell.html в шаблоны Django
+spa: frontend-deps ## Собрать SPA: ассеты в backend/.../static/storefront/spa, shell.html в шаблоны Django
 	cd frontend && npm run build
 
 # --- nginx ------------------------------------------------------------------

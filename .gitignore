@@ -41,3 +41,6 @@ test*.yml
 todo.txt
 l.txt
 REVIEW.md
+
+# Маркер прод-машины (make mark-prod): блокирует dev-цели
+.production

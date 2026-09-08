@@ -20,7 +20,11 @@ Add a journal entry in the same commit that closes a fork.
 ## Commands - use the Makefile
 
 `make help` lists everything. The project is **docker-first**: `manage.py` and `psql` targets `exec`
-into the running stack, so bring it up first.
+into the running stack - they now bring up `backend`/`postgres` themselves (never nginx) instead of
+failing. Every target is callable at any moment; `scripts/make_guard.py` keeps the two stacks apart:
+dev-* targets refuse on a production-looking host (`.production` marker, `PSDSHOP_ENV=prod`, prod
+containers running; bypass with `ALLOW_DEV=1`), prod targets refuse while `psdshop_postgres_dev` is
+up - both stacks mount the same volume. `dev-nuke` and `db-restore` need `FORCE=1`.
 
 ```bash
 make init          # bootstrap step 1: check-deps → install → pre-commit → env, then STOPS.
@@ -28,6 +32,7 @@ make init          # bootstrap step 1: check-deps → install → pre-commit →
 make env           # create .env from *.dist where missing
 make install       # backend + frontend (install-backend / install-frontend for one)
 make up / down / ps / logs[-backend|-db|-nginx]
+make mark-prod     # on the server: writes .production, after which every dev-* target refuses
 
 # Local dev - app processes on the host, only postgres in docker (rootless podman cannot bind 80/443)
 make dev-infra     # postgres only (docker-compose.dev.yaml), on localhost:5432

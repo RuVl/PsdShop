@@ -3,6 +3,34 @@
 Traps that cost time and can bite again: what broke, why, and what the fix assumes. Newest first.
 The architecture itself is in [`architecture.md`](./architecture.md).
 
+## 2026-09-08 - the Makefile refused nothing and assumed everything
+
+`make messages` on a host with the stack down died with
+`no container with name or ID "psdshop_backend_1"`: half the targets assumed something was already
+running. Container targets now depend on `stack` / `stack-db`, which `exec` first and only
+`up -d --build --wait backend` when that fails - the backend service, never nginx, so ports 80/443
+stay out of it on a rootless-podman laptop. `spa` and `dev-frontend` depend on `frontend-deps`
+(`npm install` only when `node_modules` is missing), `db-dump` creates the dump directory and
+`db-restore` checks the file is there before opening a psql session.
+
+The other half is that both compose files mount the same `psdshop_postgres`.
+`scripts/make_guard.py` is the arbiter: `guard-dev` refuses a dev-* target when the host looks like
+production (the `.production` marker written by `make mark-prod`, `PSDSHOP_ENV=prod`, or a running
+container of the prod stack), `guard-prod` refuses to start the prod stack while
+`psdshop_postgres_dev` is up. Both also assert the `.env` files the recipe is about to need, which
+used to surface as an opaque `uv`/compose error halfway through. `make dev-nuke` now needs `FORCE=1`
+as well - it drops the volume production shares, not a local copy of it.
+
+Postgres does not catch this on its own, which is what makes the guard worth its lines: both
+containers were caught serving the same data directory at once during this very change - each one
+logged `database system was not properly shut down` and then `ready to accept connections`. The
+`postmaster.pid` interlock compares a pid inside the writer's own namespace, so the second
+container's server never recognised the first one as alive.
+
+**Watch out:** the marker is the only signal that survives a stopped stack, so a server where
+`make mark-prod` was never run is protected by container names alone. `ALLOW_DEV=1` bypasses the dev
+guard - that escape hatch is for a laptop that once ran `make up`, not for the server.
+
 ## 2026-09-04 - the type filter wrapped, and the purchases page had no entrance
 
 **The type facet.** `style.css` draws it as right-aligned wrapping 12px links
