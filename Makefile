@@ -22,7 +22,9 @@
 #   * dev-цели ОТКАЗЫВАЮТСЯ работать там, где похоже на прод: есть маркер .production
 #     (`make mark-prod`), выставлен PSDSHOP_ENV=prod или запущены контейнеры прод-стека.
 #     Осознанный обход: ALLOW_DEV=1 make <цель>.
-#   * цели прод-стека ОТКАЗЫВАЮТСЯ стартовать, пока поднят dev-postgres (общий volume).
+#   * цели прод-стека ОТКАЗЫВАЮТСЯ стартовать на рабочей машине: маркер .development
+#     (`make mark-dev`), PSDSHOP_ENV=dev или поднятый dev-postgres (общий volume).
+#     Осознанный обход: ALLOW_PROD=1 make <цель>.
 #   * оба стража проверяют наличие нужных .env — вместо невнятной ошибки uv/compose.
 #
 # Любую цель можно звать в любой момент: цели прод-стека сами поднимают backend/postgres
@@ -102,6 +104,14 @@ mark-prod: ## Пометить машину как прод (файл .productio
 .PHONY: unmark-prod
 unmark-prod: ## Снять маркер .production
 	@$(UV) run --no-project python -c "import pathlib; pathlib.Path('.production').unlink(missing_ok=True); print('OK: маркер .production удалён')"
+
+.PHONY: mark-dev
+mark-dev: ## Пометить машину как рабочую (.development): прод-цели тут будут отказывать
+	@$(UV) run --no-project python -c "import pathlib; pathlib.Path('.development').write_text('developer machine: the production stack refuses to start here\n', encoding='utf-8'); print('OK: маркер .development создан, прод-цели заблокированы')"
+
+.PHONY: unmark-dev
+unmark-dev: ## Снять маркер .development
+	@$(UV) run --no-project python -c "import pathlib; pathlib.Path('.development').unlink(missing_ok=True); print('OK: маркер .development удалён')"
 
 # --- Подготовка окружения ---------------------------------------------------
 

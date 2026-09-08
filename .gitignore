@@ -42,5 +42,6 @@ todo.txt
 l.txt
 REVIEW.md
 
-# Маркер прод-машины (make mark-prod): блокирует dev-цели
+# Маркеры машины (make mark-prod / make mark-dev): блокируют чужие цели
 .production
+.development

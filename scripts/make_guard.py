@@ -32,12 +32,15 @@ DEV_POSTGRES = "psdshop_postgres_dev"
 # The other production services get their names from compose (psdshop_backend_1, psdshop-nginx-1).
 PROD_SERVICE_RE = re.compile(r"psdshop[-_].*(backend|nginx|mail)", re.IGNORECASE)
 
-# Touch this file on the server (`make mark-prod`) - it survives a stopped stack, unlike a
-# container check, and is the only signal that still works when nothing is running.
+# Touch one of these files on the machine (`make mark-prod` / `make mark-dev`) - a marker survives
+# a stopped stack, unlike a container check, and is the only signal left when nothing is running.
 PROD_MARKER = pathlib.Path(".production")
 PROD_ENV_VALUES = {"prod", "production"}
+DEV_MARKER = pathlib.Path(".development")
+DEV_ENV_VALUES = {"dev", "development", "local"}
 
 OVERRIDE = "ALLOW_DEV"
+OVERRIDE_PROD = "ALLOW_PROD"
 
 
 def running_containers(docker: str) -> list[str]:
@@ -106,17 +109,40 @@ def guard_dev(docker: str) -> int:
     return refuse(lines)
 
 
-def guard_prod(docker: str) -> int:
+def dev_reasons(docker: str) -> list[str]:
+    """Why the production stack has no business starting here."""
+    reasons = []
+    if DEV_MARKER.exists():
+        reasons.append(f"есть маркер {DEV_MARKER} (его ставит `make mark-dev`)")
+    env_value = os.environ.get("PSDSHOP_ENV", "").strip().lower()
+    if env_value in DEV_ENV_VALUES:
+        reasons.append(f"PSDSHOP_ENV={env_value}")
     if DEV_POSTGRES in running_containers(docker):
-        return refuse(
-            [
-                f"ОТКАЗ: запущен dev-postgres ({DEV_POSTGRES}), а прод-стек берёт тот же volume",
-                "  psdshop_postgres. Два postgres на одном каталоге данных портят базу.",
-                "  Сначала: make dev-infra-down.",
-                "  Либо возьмите локальный аналог цели: dev-* (make dev-messages, make dev-manage ...).",
-            ]
+        reasons.append(
+            f"запущен dev-postgres ({DEV_POSTGRES}) на том же volume {PROD_POSTGRES}"
         )
-    return 0
+    return reasons
+
+
+def guard_prod(docker: str) -> int:
+    reasons = dev_reasons(docker)
+    if not reasons:
+        return 0
+    if os.environ.get(OVERRIDE_PROD) == "1":
+        print(
+            f"ВНИМАНИЕ: {OVERRIDE_PROD}=1 - прод-цель выполняется на dev-машине: {'; '.join(reasons)}"
+        )
+        return 0
+    return refuse(
+        [
+            "ОТКАЗ: прод-стек тут поднимать нельзя.",
+            *(f"  - {r}" for r in reasons),
+            f"  Оба стека монтируют volume {PROD_POSTGRES}: два postgres на одном каталоге данных",
+            "  портят базу, и postmaster.pid этого не ловит (у контейнеров свои PID namespace).",
+            "  Локальный аналог цели - с префиксом dev- (make dev-messages, make dev-manage ...).",
+            f"  Если прод-стек нужен именно тут: {OVERRIDE_PROD}=1 make <цель> (сначала make dev-infra-down).",
+        ]
+    )
 
 
 def guard_files(paths: list[str]) -> int:

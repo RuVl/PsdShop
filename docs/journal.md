@@ -27,9 +27,14 @@ logged `database system was not properly shut down` and then `ready to accept co
 `postmaster.pid` interlock compares a pid inside the writer's own namespace, so the second
 container's server never recognised the first one as alive.
 
-**Watch out:** the marker is the only signal that survives a stopped stack, so a server where
-`make mark-prod` was never run is protected by container names alone. `ALLOW_DEV=1` bypasses the dev
-guard - that escape hatch is for a laptop that once ran `make up`, not for the server.
+The guard is symmetric because the accident is: `make up` on a developer laptop is what started
+the collision above. `make mark-dev` writes `.development`, and after that `up`, `build`, `mail-up`
+and the `stack` prerequisite refuse there, the way dev-* targets refuse on a marked server.
+
+**Watch out:** a marker is the only signal that survives a stopped stack, so a machine where
+neither `make mark-prod` nor `make mark-dev` was run is protected by container names alone.
+`ALLOW_DEV=1` / `ALLOW_PROD=1` bypass their guard - those escape hatches are for a laptop that
+really does need the other stack for one command, not for the server.
 
 ## 2026-09-04 - the type filter wrapped, and the purchases page had no entrance
 
